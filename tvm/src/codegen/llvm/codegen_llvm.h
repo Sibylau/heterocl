@@ -5,6 +5,10 @@
  */
 #ifndef TVM_CODEGEN_LLVM_CODEGEN_LLVM_H_
 #define TVM_CODEGEN_LLVM_CODEGEN_LLVM_H_
+
+//////////
+// #define TVM_LLVM_VERSION
+//////////
 #ifdef TVM_LLVM_VERSION
 
 #include <tvm/ir.h>
@@ -219,6 +223,14 @@ class CodeGenLLVM :
                        llvm::Value* end,
                        llvm::Value* stride,
                        const VarExpr& loop_var, const Stmt& body);
+  // Create Unroll For, added by jl3952@cornell.edu
+  void CreateUnrollFor(llvm::Value* begin,
+                       llvm::Value* end,
+                       llvm::Value* stride,
+                       const VarExpr& loop_var,
+                       const Stmt& body,
+                       const Array<Expr>& annotate_keys,
+                       const Array<Expr>& annotate_values); 
   // add alias information.
   void AddAliasInfo(llvm::Instruction* load, const Variable* buffer, Expr index, Type type);
   // The IRBuilder.

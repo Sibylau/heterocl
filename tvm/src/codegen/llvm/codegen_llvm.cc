@@ -2,6 +2,9 @@
  *  Copyright (c) 2017 by Contributors
  * \file codegen_llvm.cc
  */
+/////////////
+// #define TVM_LLVM_VERSION
+/////////////
 #ifdef TVM_LLVM_VERSION
 // Part of the code are adapted from Halide's CodeGen_LLVM
 
@@ -448,6 +451,97 @@ llvm::Value* CodeGenLLVM::CreateVecConcat(std::vector<llvm::Value*> vecs) {
   return CreateVecSlice(vecs[0], 0, total_lanes);
 }
 
+// Loop unroll, Add by jl3952@cornell.edu
+void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
+                                  llvm::Value* end,
+                                  llvm::Value* stride,
+                                  const VarExpr& loop_var,
+                                  const Stmt& body,
+                                  const Array<Expr>& annotate_keys,
+                                  const Array<Expr>& annotate_values) {
+  // llvm::errs() << "Unroll IR has not yet built.\n";
+  using llvm::BasicBlock;
+
+  if (annotate_keys.size() == 0) 
+    LOG(FATAL) << "Error: no unroll statement";
+  Expr& for_key = annotate_keys.pop_back();
+  if (for_key.get() != "factor" ) 
+    LOG(FATAL) << "Mismatch of unroll statement and factor";
+  Expr& new_stride = annotate_values.pop_back();
+  if(new_stride.get() > (end - begin))
+    new_stride = end - begin;
+  llvm::Value* unroll_bound = new_stride.get() - 1;
+    
+  BasicBlock* pre_block = builder_->GetInsertBlock();
+  BasicBlock* for_begin = BasicBlock::Create(
+      *ctx_, "for_begin", function_);
+  BasicBlock* for_body = BasicBlock::Create(
+      *ctx_, "for_body", function_);
+  BasicBlock* remainder_exist = BasicBlock::Create(
+      *ctx_, "remainder_exist", function_);
+  BasicBlock* remainder_for_begin = BasicBlock::Create(
+      *ctx_, "remainder_for_begin", function_);
+  BasicBlock* remainder_for_body = BasicBlock::Create(
+      *ctx_, "remainder_for_body", function_);  
+  BasicBlock* for_end = BasicBlock::Create(
+      *ctx_, "for_end", function_);
+
+  break_bbs_.push_back(for_end);
+
+  builder_->CreateBr(for_begin);
+  builder_->SetInsertPoint(for_begin);
+  llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2)
+  loop_value->addIncoming(begin, pre_block);
+  CHECK(!var_map_.count(loop_var.get()));
+  var_map_[loop_var.get()] = loop_value;
+  llvm::Value* unroll_body = CreateAdd(loop_var.type(), loop_value, unroll_bound);
+  builder_->CreateCondBr(CreateLT(unroll_body.type(), unroll_body, end),
+                         for_body, remainder_exist, md_very_likely_branch_);
+
+  builder_->SetInsertPoint(for_body);
+  llvm::Value* loop_value_update = loop_value;
+  for(auto It = 0; It < new_stride; It++) {
+    has_return_ = false;
+    this->VisitStmt(body);
+    loop_value_update = CreateAdd(loop_var.type(), loop_value_update, stride);
+    var_map_[loop_var.get()] = loop_value_update;
+    if (has_break_ || has_return_) {
+      has_break_ = false;
+      has_return_ = false;
+      builder_->CreateBr(for_end);
+    }
+  }
+  var_map_.erase(loop_var.get());
+  llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, new_stride);
+  loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
+  builder_->CreateBr(for_begin);
+
+  builder_->SetInsertPoint(remainder_exist);
+  llvm::Value* eq_trip_count = builder_->CreateICmpEQ(loop_value, end);
+  builder_->CreateCondBr(eq_trip_count, for_end, remainder_for_begin, md_very_likely_branch_);
+  
+  builder_->SetInsertPoint(remainder_for_begin);
+  llvm::PHINode* remainder_loop_value = builder_->CreatePHI(begin->getType(), 2);
+  remainder_loop_value->addIncoming(loop_value, for_begin);
+  var_map_[loop_var.get()] = remainder_loop_value;
+  builder_->CreateCondBr(CreateLT(loop_var.type(), remainder_loop_value, end),
+                         remainder_for_body, for_end, md_very_likely_branch_);
+
+  builder_->SetInsertPoint(remainder_for_body);
+  has_return_ = false;
+  this->VisitStmt(body);
+  var_map_.erase(loop_var.get());
+  if(!has_break_ && !has_return_) {
+    llvm::Value* remainder_loop_next = CreateAdd(loop_var.type(), remainder_loop_value, stride);
+    remainder_loop_value->addIncoming(remainder_loop_next, builder_->GetInsertBlock());
+    builder_->CreateBr(remainder_for_begin);
+  }
+  else if(has_break_) has_break_ = false;
+  else has_return_ = false;
+
+  builder_->SetInsertPoint(for_end);
+  break_bbs_.pop_back();
+}
 
 void CodeGenLLVM::CreateSerialFor(llvm::Value* begin,
                                   llvm::Value* end,
@@ -462,15 +556,17 @@ void CodeGenLLVM::CreateSerialFor(llvm::Value* begin,
       *ctx_, "for_body", function_);
   BasicBlock* for_end = BasicBlock::Create(
       *ctx_, "for_end", function_);
-  break_bbs_.push_back(for_end);
+  break_bbs_.push_back(for_end); 
   builder_->CreateBr(for_begin);
+
   builder_->SetInsertPoint(for_begin);
   llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2);
   loop_value->addIncoming(begin, pre_block);
-  CHECK(!var_map_.count(loop_var.get()));
+  CHECK(!var_map_.count(loop_var.get())); 
   var_map_[loop_var.get()] = loop_value;
   builder_->CreateCondBr(CreateLT(loop_var.type(), loop_value, end),
                          for_body, for_end, md_very_likely_branch_);
+
   builder_->SetInsertPoint(for_body);
   has_return_ = false;
   this->VisitStmt(body);
@@ -482,8 +578,9 @@ void CodeGenLLVM::CreateSerialFor(llvm::Value* begin,
   }
   else if (has_break_) has_break_ = false;
   else has_return_ = false;
+
   builder_->SetInsertPoint(for_end);
-  break_bbs_.pop_back();
+  break_bbs_.pop_back(); 
 }
 
 // cast operatpr
@@ -1163,16 +1260,31 @@ void CodeGenLLVM::VisitStmt_(const Store* op) {
   this->Scalarize(op->index, f);
 }
 
+// void CodeGenLLVM::VisitStmt_(const For* op) {
+//   CHECK(is_zero(op->min));
+//   if (op->for_type == ForType::Unrolled) {
+//     LOG(WARNING) << "Unroll hint get ignore at CodeGenLLVM backend, "
+//                  << " consider set unroll_explicit=True";
+//   } else {
+//     CHECK(op->for_type == ForType::Serial || op->for_type == ForType::Pipelined);
+//   }
+//   CreateSerialFor(MakeValue(op->min), MakeValue(op->extent),
+//                   ConstInt32(1), op->loop_var, op->body);
+// }
+
+// Add loop unroll, modified by jl3952@cornell.edu
 void CodeGenLLVM::VisitStmt_(const For* op) {
   CHECK(is_zero(op->min));
   if (op->for_type == ForType::Unrolled) {
+    CreateUnrollFor(MakeValue(op->min), MakeValue(op->extent), ConstInt32(1), 
+                  op->loop_var, op->body, op->annotate_keys, op->annotate_values);
     LOG(WARNING) << "Unroll hint get ignore at CodeGenLLVM backend, "
                  << " consider set unroll_explicit=True";
   } else {
     CHECK(op->for_type == ForType::Serial || op->for_type == ForType::Pipelined);
-  }
-  CreateSerialFor(MakeValue(op->min), MakeValue(op->extent),
+    CreateSerialFor(MakeValue(op->min), MakeValue(op->extent),
                   ConstInt32(1), op->loop_var, op->body);
+  }
 }
 
 
@@ -1403,10 +1515,12 @@ void CodeGenLLVM::VisitStmt_(const While* op) {
       *ctx_, "while_end", function_);
   break_bbs_.push_back(while_end);
   builder_->CreateCondBr(cond, while_body, while_end);
+
   builder_->SetInsertPoint(while_body);
   this->VisitStmt(op->body);
   cond = MakeValue(op->condition);
   builder_->CreateCondBr(cond, while_body, while_end);
+
   builder_->SetInsertPoint(while_end);
   break_bbs_.pop_back();
 }
