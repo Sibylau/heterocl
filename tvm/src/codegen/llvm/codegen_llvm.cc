@@ -464,13 +464,18 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
 
   if (annotate_keys.size() == 0) 
     LOG(FATAL) << "Error: no unroll statement";
-  Expr& for_key = annotate_keys.pop_back();
-  if (for_key.get() != "factor" ) 
+  int unroll_factor = 0;
+  auto for_key = annotate_keys[annotate_keys.size()].as<StringImm>();
+  if (for_key->value != "factor") 
     LOG(FATAL) << "Mismatch of unroll statement and factor";
-  Expr& new_stride = annotate_values.pop_back();
-  if(new_stride.get() > (end - begin))
-    new_stride = end - begin;
-  llvm::Value* unroll_bound = new_stride.get() - 1;
+  auto factor = annotate_values[annotate_values.size()].as<IntImm>();
+  if(factor != nullptr && factor->value > 1)
+    unroll_factor = factor->value;
+  if (unroll_factor == 0 || unroll_factor > (end - begin))
+    unroll_factor = end - begin;
+  llvm::Value* unroll_fac_value = builder_->getInt32(unroll_factor);
+  int unroll_bound = unroll_factor - 1;
+  llvm::Value* unroll_bound_value = builder_->getInt32(unroll_bound);
     
   BasicBlock* pre_block = builder_->GetInsertBlock();
   BasicBlock* for_begin = BasicBlock::Create(
@@ -490,17 +495,17 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
 
   builder_->CreateBr(for_begin);
   builder_->SetInsertPoint(for_begin);
-  llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2)
+  llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2);
   loop_value->addIncoming(begin, pre_block);
   CHECK(!var_map_.count(loop_var.get()));
   var_map_[loop_var.get()] = loop_value;
-  llvm::Value* unroll_body = CreateAdd(loop_var.type(), loop_value, unroll_bound);
-  builder_->CreateCondBr(CreateLT(unroll_body.type(), unroll_body, end),
+  llvm::Value* unroll_body = CreateAdd(loop_var.type(), loop_value, unroll_bound_value);
+  builder_->CreateCondBr(CreateLT(loop_var.type(), unroll_body, end),
                          for_body, remainder_exist, md_very_likely_branch_);
 
   builder_->SetInsertPoint(for_body);
   llvm::Value* loop_value_update = loop_value;
-  for(auto It = 0; It < new_stride; It++) {
+  for (auto it = 0; it < unroll_factor; it++) {
     has_return_ = false;
     this->VisitStmt(body);
     loop_value_update = CreateAdd(loop_var.type(), loop_value_update, stride);
@@ -512,7 +517,7 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
     }
   }
   var_map_.erase(loop_var.get());
-  llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, new_stride);
+  llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, unroll_fac_value);
   loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
   builder_->CreateBr(for_begin);
 
@@ -531,12 +536,12 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
   has_return_ = false;
   this->VisitStmt(body);
   var_map_.erase(loop_var.get());
-  if(!has_break_ && !has_return_) {
+  if (!has_break_ && !has_return_) {
     llvm::Value* remainder_loop_next = CreateAdd(loop_var.type(), remainder_loop_value, stride);
     remainder_loop_value->addIncoming(remainder_loop_next, builder_->GetInsertBlock());
     builder_->CreateBr(remainder_for_begin);
   }
-  else if(has_break_) has_break_ = false;
+  else if (has_break_) has_break_ = false;
   else has_return_ = false;
 
   builder_->SetInsertPoint(for_end);
