@@ -459,23 +459,35 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
                                   const Stmt& body,
                                   const Array<Expr>& annotate_keys,
                                   const Array<Expr>& annotate_values) {
-  // llvm::errs() << "Unroll IR has not yet built.\n";
+  llvm::errs() << "Entered Loop Unroll Codegen.\n";
   using llvm::BasicBlock;
 
-  if (annotate_keys.size() == 0) 
+  if (annotate_keys.size() == 0 || annotate_values.size() == 0) 
     LOG(FATAL) << "Error: no unroll statement";
-  int unroll_factor = 0;
-  auto for_key = annotate_keys[annotate_keys.size()].as<StringImm>();
+  auto for_key = annotate_keys[annotate_keys.size() - 1].as<StringImm>();
   if (for_key->value != "factor") 
     LOG(FATAL) << "Mismatch of unroll statement and factor";
-  auto factor = annotate_values[annotate_values.size()].as<IntImm>();
-  if(factor != nullptr && factor->value > 1)
+  unsigned unroll_factor = 0;
+  unsigned unroll_bound = 0;
+  auto factor = annotate_values[annotate_values.size() - 1].as<IntImm>();
+  if(factor != nullptr && factor->value > 1) {
     unroll_factor = factor->value;
-  if (unroll_factor == 0 || unroll_factor > (end - begin))
-    unroll_factor = end - begin;
+    unroll_bound = unroll_factor - 1;
+  }
+  else
+    LOG(FATAL) << "Illegal unroll factor. Fully Unroll currently not supported.";
+  // llvm::ConstantInt* CI_begin = llvm::dyn_cast<llvm::ConstantInt>(begin);
+  // llvm::ConstantInt* CI_end = llvm::dyn_cast<llvm::ConstantInt>(end);
+  // llvm::ConstantInt* CI_stride = llvm::dyn_cast<llvm::ConstantInt>(stride);
+  // llvm::errs() << "CI_begin: "<< CI_begin <<"  CI_end: "<< CI_end<< "  diff: "<<
+  // CI_end - CI_begin <<"\n";
+  // llvm::errs() << "CI_stride: "<<CI_stride<<"\n";
+  // if (unroll_factor == 0 || unroll_factor > (CI_end - CI_begin))
+  //   unroll_factor = CI_end - CI_begin;
   llvm::Value* unroll_fac_value = builder_->getInt32(unroll_factor);
-  int unroll_bound = unroll_factor - 1;
   llvm::Value* unroll_bound_value = builder_->getInt32(unroll_bound);
+  llvm::errs() << "unroll_factor = " << unroll_factor << "\n";
+  llvm::errs() << "unroll_bound = " << unroll_bound << "\n";
     
   BasicBlock* pre_block = builder_->GetInsertBlock();
   BasicBlock* for_begin = BasicBlock::Create(
@@ -494,6 +506,7 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
   break_bbs_.push_back(for_end);
 
   builder_->CreateBr(for_begin);
+  // llvm::errs() << "for_begin br suc\n";
   builder_->SetInsertPoint(for_begin);
   llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2);
   loop_value->addIncoming(begin, pre_block);
@@ -504,30 +517,40 @@ void CodeGenLLVM::CreateUnrollFor(llvm::Value* begin,
                          for_body, remainder_exist, md_very_likely_branch_);
 
   builder_->SetInsertPoint(for_body);
+  has_return_ = false;
   llvm::Value* loop_value_update = loop_value;
-  for (auto it = 0; it < unroll_factor; it++) {
-    has_return_ = false;
+  for (unsigned it = 0; it < unroll_factor; it++) {
+    // has_return_ = false;
     this->VisitStmt(body);
     loop_value_update = CreateAdd(loop_var.type(), loop_value_update, stride);
-    var_map_[loop_var.get()] = loop_value_update;
-    if (has_break_ || has_return_) {
-      has_break_ = false;
-      has_return_ = false;
-      builder_->CreateBr(for_end);
-    }
+    // llvm::ConstantInt* CI_loop_next = llvm::dyn_cast<llvm::ConstantInt>(loop_value_update);
+    // llvm::errs() <<"CI_loop_next: "<<CI_loop_next<<"\n";
+    var_map_[loop_var.get()] = loop_value_update; 
+    // if (has_break_ || has_return_) {
+    //   has_break_ = false;
+    //   has_return_ = false;
+    //   builder_->CreateBr(for_end);
+    // }
   }
   var_map_.erase(loop_var.get());
-  llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, unroll_fac_value);
-  loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
-  builder_->CreateBr(for_begin);
+  if (!has_break_ && !has_return_) {
+    llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, unroll_fac_value);
+    loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
+    builder_->CreateBr(for_begin);
+  }
+  else if (has_break_) has_break_ = false;
+  else has_return_ = false;
 
   builder_->SetInsertPoint(remainder_exist);
-  llvm::Value* eq_trip_count = builder_->CreateICmpEQ(loop_value, end);
-  builder_->CreateCondBr(eq_trip_count, for_end, remainder_for_begin, md_very_likely_branch_);
+  // llvm::Value* eq_trip_count = CreateICmpEQ(loop_value, end);
+  // llvm::Value* eq_trip_count = builder_->CreateICmpEQ(loop_value, end);
+  builder_->CreateCondBr(CreateGE(loop_var.type(), loop_value, end), 
+                         for_end, remainder_for_begin, md_very_likely_branch_);
   
   builder_->SetInsertPoint(remainder_for_begin);
   llvm::PHINode* remainder_loop_value = builder_->CreatePHI(begin->getType(), 2);
-  remainder_loop_value->addIncoming(loop_value, for_begin);
+  remainder_loop_value->addIncoming(loop_value, remainder_exist);
+  CHECK(!var_map_.count(loop_var.get())); 
   var_map_[loop_var.get()] = remainder_loop_value;
   builder_->CreateCondBr(CreateLT(loop_var.type(), remainder_loop_value, end),
                          remainder_for_body, for_end, md_very_likely_branch_);
@@ -567,6 +590,14 @@ void CodeGenLLVM::CreateSerialFor(llvm::Value* begin,
   builder_->SetInsertPoint(for_begin);
   llvm::PHINode* loop_value = builder_->CreatePHI(begin->getType(), 2);
   loop_value->addIncoming(begin, pre_block);
+  /////
+  // llvm::ConstantInt* CI_begin = llvm::dyn_cast<llvm::ConstantInt>(begin);
+  // llvm::ConstantInt* CI_end = llvm::dyn_cast<llvm::ConstantInt>(end);
+  // llvm::ConstantInt* CI_stride = llvm::dyn_cast<llvm::ConstantInt>(stride);
+  // llvm::errs() << "CI_begin: "<< CI_begin <<"  CI_end: "<< CI_end<< "  diff: "<<
+  // CI_end - CI_begin <<"\n";
+  // llvm::errs() << "CI_stride: "<<CI_stride<<"\n";
+  /////
   CHECK(!var_map_.count(loop_var.get())); 
   var_map_[loop_var.get()] = loop_value;
   builder_->CreateCondBr(CreateLT(loop_var.type(), loop_value, end),
@@ -578,6 +609,10 @@ void CodeGenLLVM::CreateSerialFor(llvm::Value* begin,
   var_map_.erase(loop_var.get());
   if (!has_break_ && !has_return_) {
     llvm::Value* loop_next = CreateAdd(loop_var.type(), loop_value, stride);
+    /////
+    // llvm::ConstantInt* CI_loop_next = llvm::dyn_cast<llvm::ConstantInt>(loop_next);
+    // llvm::errs() <<"CI_loop_next: "<<CI_loop_next<<"\n";
+    /////
     loop_value->addIncoming(loop_next, builder_->GetInsertBlock());
     builder_->CreateBr(for_begin);
   }
@@ -1283,8 +1318,8 @@ void CodeGenLLVM::VisitStmt_(const For* op) {
   if (op->for_type == ForType::Unrolled) {
     CreateUnrollFor(MakeValue(op->min), MakeValue(op->extent), ConstInt32(1), 
                   op->loop_var, op->body, op->annotate_keys, op->annotate_values);
-    LOG(WARNING) << "Unroll hint get ignore at CodeGenLLVM backend, "
-                 << " consider set unroll_explicit=True";
+    // LOG(WARNING) << "Unroll hint get ignore at CodeGenLLVM backend, "
+    //              << " consider set unroll_explicit=True";
   } else {
     CHECK(op->for_type == ForType::Serial || op->for_type == ForType::Pipelined);
     CreateSerialFor(MakeValue(op->min), MakeValue(op->extent),
