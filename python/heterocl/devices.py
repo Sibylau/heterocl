@@ -54,7 +54,8 @@ tool_table = {
   "ppac"        : tool("rocket",     *option_table["rocket"]),
   "vlab"        : tool("aocl",       *option_table["aocl"]),
   "stratix10_sx": tool("aocl",       *option_table["aocl"]),
-  "llvm"        : tool("llvm",       *option_table["llvm"])
+  "llvm"        : tool("llvm",       *option_table["llvm"]),
+  "asic"        : tool("cadence",    *option_table["cadence"]) # jl3952
 }
 
 class Memory(object):
@@ -173,7 +174,7 @@ class Device(object):
 
     def set_lang(self, lang):
         assert lang in \
-            ["xocl", "aocl", "vhls", "ihls", "merlinc", "cuda"], \
+            ["xocl", "aocl", "vhls", "ihls", "merlinc", "cuda", "systemc"], \
             "unsupported lang sepc " + lang
         self.lang = lang
         return self
@@ -233,12 +234,22 @@ class PIM(Device):
     def __repr__(self):
         return "pim-" + str(self.model)
 
+class ASIC(Device): # jl3952
+    """ASIC device with different models"""
+    def __init__(self, vendor, model, **kwargs):
+        if model not in ["asic"]: 
+            raise DeviceError(model + " not supported yet")
+        super(ASIC, self).__init__("ASIC", vendor, model, **kwargs)
+    def __repr__(self):
+        return "asic-" + str(self.model)
+
 dev_table = {
   "aws_f1"       : [CPU("intel", "e5"), FPGA("xilinx", "xcvu19p")],
   "vlab"         : [CPU("intel", "e5"), FPGA("intel", "arria10")],
   "zc706"        : [CPU("arm", "a9"), FPGA("xilinx", "xc7z045")],
   "rocc-ppac"    : [CPU("riscv", "riscv"), PIM("ppac", "ppac")],
-  "stratix10_sx" : [CPU("arm", "a53"), FPGA("intel", "stratix10_gx")]
+  "stratix10_sx" : [CPU("arm", "a53"), FPGA("intel", "stratix10_gx")],
+  "asic"         : [CPU("intel", "e5"), ASIC("cadence", "asic")] # jl3952
 }
 
 class env(type):
@@ -275,6 +286,10 @@ class env(type):
             devs = dev_table["rocc-ppac"]
             host = devs[0].set_lang("c")
             xcel = None 
+        elif key == "asic": # jl3952
+            devs = dev_table["asic"]
+            host = devs[0].set_lang("systemc")
+            xcel = devs[1].set_lang("systemc")
         else: # unsupported device
             raise DeviceError(key + " not supported")
         tool = tool_table[key]
@@ -297,6 +312,8 @@ class platform(with_metaclass(env, object)):
             self.cpu = host
         if isinstance(xcel, FPGA):
             self.fpga = xcel
+        elif isinstance(xcel, ASIC): # jl3952
+            self.asic = xcel
         elif isinstance(xcel, PIM) and xcel.model == "ppac":
             self.ppac = xcel
 
@@ -358,7 +375,7 @@ class platform(with_metaclass(env, object)):
             self.tool.mode = mode
 
         if backend is not None: # set up backend lang
-            assert backend in ["vhls", "aocl"], "not support backend lang " + backend
+            assert backend in ["vhls", "aocl", "systemc"], "not support backend lang " + backend
             self.xcel.lang = backend
         else:   
             if compile == "vitis":
