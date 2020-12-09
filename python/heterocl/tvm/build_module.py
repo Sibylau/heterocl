@@ -439,10 +439,10 @@ def build_fpga_kernel(sch, args, target, name="default_function", schedule_name=
     try: # generate and split code
         host, xcel = None, None
         if target.tool.name in ("sdaccel", "vitis"):
-            assert target.host.lang in ["xocl", "vhls"], \
+            assert target.host.lang in ["xocl", "vhls", "systemc", "catapultc"], \
                    target.host.lang + " not support"
-            assert target.xcel.lang in ["xocl", "vhls"], \
-                   target.xcel.lang + " not support"
+            # assert target.xcel.lang in ["xocl", "vhls"], \
+            #        target.xcel.lang + " not support"
             host = target.host.lang
             xcel = target.xcel.lang
 

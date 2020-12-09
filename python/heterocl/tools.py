@@ -16,7 +16,7 @@ option_table = {
   "vitis"   : ("sw_sim", {"version" : "2019.2", "clock" : "1"}),
   "vivado_hls" : ("sw_sim", {"version" : "2017.1"}),
   "rocket"     : ("debug", {"RISCV" : ""}),
-  "cadence" : ("sw_sim"), # jl3952
+  "cadence" : ("sw_sim", {"verion"  : ""}), # jl3952
 
   # refer to xilinx2016_1/ug904-vivado-implementation.pdf
   "vivado"     : ("pnr",

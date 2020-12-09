@@ -174,7 +174,7 @@ class Device(object):
 
     def set_lang(self, lang):
         assert lang in \
-            ["xocl", "aocl", "vhls", "ihls", "merlinc", "cuda", "systemc"], \
+            ["xocl", "aocl", "vhls", "ihls", "merlinc", "cuda", "systemc", "catapultc"], \
             "unsupported lang sepc " + lang
         self.lang = lang
         return self
@@ -375,7 +375,7 @@ class platform(with_metaclass(env, object)):
             self.tool.mode = mode
 
         if backend is not None: # set up backend lang
-            assert backend in ["vhls", "aocl", "systemc"], "not support backend lang " + backend
+            assert backend in ["vhls", "aocl", "systemc", "catapultc"], "not support backend lang " + backend
             self.xcel.lang = backend
         else:   
             if compile == "vitis":
