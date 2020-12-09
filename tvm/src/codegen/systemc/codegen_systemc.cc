@@ -1,16 +1,735 @@
+// /*!
+//  *  Copyright (c) 2017 by Contributors
+//  * \file codegen_systemc.cc
+//  */
+// #include <tvm/runtime/config.h>
+// #include <tvm/packed_func_ext.h>
+// #include <tvm/ir_pass.h>
+// #include <vector>
+// #include <string>
+// #include <tuple>
+// #include <regex>
+// #include "./codegen_systemc.h"
+// #include "../../runtime/thread_storage_scope.h"
+
+// namespace TVM {
+// namespace codegen {
+
+// struct argInfo {
+//   std::string     name;
+//   StorageType     mem_type;
+//   int             mem_port;
+//   StreamType      stream_type;
+//   int             channel_depth;
+//   bool            is_written;
+// };
+
+// CodeGenSystemC::CodeGenSystemC() {
+//   restrict_keyword_ = "restrict"; // FIXME: Check if this is useful
+//   return ;
+// }
+
+// // assign "global" to all array types?
+// void CodeGenSystemC::InitFuncState(LoweredFunc f) {
+//   CodeGenC::InitFuncState(f);
+//   for (Var arg : f->args) {
+//     if (arg.type().is_handle()) {
+//       alloc_storage_scope_[arg.get()] = "global";
+//     }
+//   }
+//   return ;
+// }
+
+// void CodeGenSystemC::AddFunction(LoweredFunc f,
+//         str2tupleMap<std::string, Type> map_arg_type) {
+//   // Clear previous generated state
+//   this->InitFuncState(f);
+
+//   // Skip the first underscore, so SSA variable starts from _1
+//   GetUniqueName("_");
+
+//   // Register alloc buffer type
+//   for (const auto & kv : f->handle_data_type) {
+//     RegisterHandleType(kv.first.get(), kv.second.type());
+//   }
+
+//   // Write header files
+//   this->stream << "#ifndef DUT_H\n";
+//   this->stream << "#define DUT_H\n\n";
+//   this->stream << "#include <cynw_p2p.h>\n";
+//   this->stream << "#include \"defines.h\"\n";
+
+//   // Write entry function name
+//   this->stream << "SC_MODULE( " << f->name << " ) \n{\n";
+//   this->stream << "public:\n";
+//   this->PrintIndent();
+//   this->stream << "sc_in< bool > clk;\n";
+//   this->PrintIndent();
+//   this->stream << "sc_in< bool > rst;\n";
+
+//   // Write arguments
+//   // All args are Cadence Stratus Streaming dtype
+//   for (size_t i = 0; i < f->args.size(); ++i) {
+//     Var v = f->args[i];
+//     // auto attr = f->attributes[i];
+//     std::string vid = AllocVarID(v.get());
+//     // if (i != 0) this->stream << ", ";
+//     if (map_arg_type.find(vid) == map_arg_type.end()) {
+//       LOG(WARNING) << vid << " type not found\n";
+//       PrintType(v.type(), this->stream);
+//       this->stream << ' ' << vid;
+//     }
+//     else {
+//       auto arg = map_arg_type[vid];
+//       this->stream << "cynw_p2p < ";
+//       PrintType(v.type(), this->stream);
+//       this->stream << " >::in ";
+//       this->stream << std::get<0>(arg);
+//       this->stream << ";\n";
+//       top_args.insert(std::get<0>(arg));
+//     }
+//   }
+//   this->stream << "\nSC_CTOR( " << f->name << " ): \n";
+//   this->stream << "clk ( \"clk\" ), \n";
+//   this->stream << "rst ( \"rst\" ), \n";
+//   this->stream << "\n{";
+//   int func_scope = this->BeginScope();
+//   this->PrintStmt(f->body);
+//   this->EndScope(func_scope);
+//   this->PrintIndent();
+//   this->stream << "}\n\n";
+// }
+
+// std::string CodeGenSystemC::Finish() {
+//   return CodeGenC::Finish();
+// }
+
+// void CodeGenSystemC::VisitStmt_(const KernelStmt *op) {
+//   PrintIndent();
+//   this->stream << "entered KernelDef\n";
+//   stream << op->name << "(";
+
+//   // Extract annotation values
+//   std::vector<argInfo> args_info;
+//   for (size_t k = 0; k < op->annotate_keys.size(); k++) {
+//     auto key = op->annotate_values[k].as<StringImm>(); CHECK(key);
+//   }
+//   // Print kernel function arguments
+//   for (size_t i = 0; i < op->args.size(); i++) {
+//     std::string arg_name = PrintExpr(op->args[i]);
+//     stream << arg_name;
+//     if (i < op->args.size() - 1) stream << ", ";
+//   }
+//   stream << ");\n";
+// }
+
+// void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
+//   LoweredFunc f;
+//   // save func states
+//   this->stream << "entered KernelDef\n";
+//   CodeGenC::SaveFuncState(f);
+//   CodeGenC::InitFuncState(f);
+//   std::ostringstream save;
+//   std::ostringstream pragma;
+//   save << this->stream.str();
+//   this->stream.str("");
+//   this->stream.clear();
+
+//   // skip the first underscore
+//   GetUniqueName("_");
+//   // add to alloc buffer : type.
+//   for (const auto & k : op->args) {
+//     RegisterHandleType(k.get(), k.get()->type);
+//   }
+
+//   // collect argument information
+//   std::vector<argInfo> args_info;
+//   bool is_kernel_func = false;
+//   for (size_t i = 0; i < op->attributes.size(); i++) {
+//     auto info = op->attributes[i];
+//     CHECK(info.size() >=2);
+//     auto arg_name = info[0].as<StringImm>()->value;
+//     for (size_t i = 0; i < arg_name.size(); ++i) {
+//       if (arg_name[i] == '.') arg_name[i] = '_';
+//     }
+
+//     if (info.size() > 2) { 
+//         is_kernel_func = true;
+//         CHECK(info.size() == 6);
+//         auto mem_dev = static_cast<StorageType>(info[1].as<IntImm>()->value);
+//         int mem_port = info[2].as<IntImm>()->value;
+//         auto stream_type = static_cast<StreamType>(info[3].as<IntImm>()->value);
+//         int channel_depth = info[4].as<IntImm>()->value;
+//         bool is_written = info[5].as<IntImm>()->value == 1 ? true : false;
+//         argInfo arg_info = {arg_name, mem_dev, mem_port, stream_type, channel_depth, is_written};
+//         args_info.push_back(arg_info);
+
+//     } else {
+//         bool is_written = info[1].as<IntImm>()->value == 1 ? true : false;
+//         argInfo arg_info;
+//         arg_info.is_written = is_written;
+//         args_info.push_back(arg_info);
+//     }
+//   }
+
+//   // print top-level kernel function
+//   if (is_kernel_func) {
+
+//     int extern_scope = -1;
+//     if (extern_mode) {
+//       extern_scope  = BeginScope();
+//       stream << "extern \"C\" {\n";
+//     }
+
+//     stream << "void " << op->name << "(";
+//     for (size_t i = 0; i < op->args.size(); ++i) {
+//       VarExpr v = op->args[i];
+//       var_shape_map_[v.get()] = op->arg_shapes[i];
+//       std::string vid = AllocVarID(v.get());
+
+//       if (i != 0) stream << ", ";
+//       std::string str = PrintExpr(op->arg_types[i]);
+//       Type type = String2Type(str);
+
+//       // pass-by-value arguments
+//       if (var_shape_map_[v.get()].size() == 1 &&
+//           var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
+//         PrintType(type, stream);
+//         this->stream << " " << vid;
+
+//       // pass-by-pointer arguments
+//       } else {
+//         CHECK(args_info.size() > i) << i << ":" << args_info.size();
+//         auto info = args_info[i];
+
+//         if (info.stream_type == StreamType::FIFO) {
+//           auto bits = type.bits();
+//           if (decl_stream.str().find("typedef qdma_axis<" + 
+//                   std::to_string(bits)) == std::string::npos) {
+//             decl_stream << "typedef qdma_axis<" << bits 
+//                         << ", 0, 0, 0> pkt_b" << bits << ";\n";
+//           }
+//           stream << "hls::stream<pkt_b" << bits << "> &" << vid;
+
+//         // Memory-mapped pointers
+//         } else {
+//           PrintType(type, stream);
+//           auto size = var_shape_map_[v.get()];
+//           stream << " " << vid;
+//           for (auto& s : size) {
+//             stream << "[" << s << "]";
+//           }
+//         }
+//       }
+//     }
+//     stream << ") {\n";
+
+//     if (extern_mode) {
+//       // Port-level protocol interface
+//       CHECK(op->args.size() == op->args.size());
+//       for (size_t i = 0; i < op->args.size(); i++) {
+//         if (op->arg_shapes[i].size() == 1 &&
+//             op->arg_shapes[i][0].as<IntImm>()->value == 1) {
+//           continue;
+//         } else {
+//           PrintIndent();
+//           auto info = args_info[i];
+
+//           if (info.stream_type == StreamType::FIFO) {
+//             stream << "#pragma HLS INTERFACE axis port="
+//                    << info.name << "\n";
+//           } else {
+//             stream << "#pragma HLS INTERFACE m_axi port="
+//                    << info.name << " "
+//                    << "offset=slave bundle=gmem" << info.mem_port << "\n";
+//           }
+//         }
+//       }
+
+//       // Block-level control interface 
+//       for (size_t i = 0; i < op->args.size(); i++) {
+//         auto info = args_info[i];
+//         if (info.stream_type == StreamType::FIFO) continue;
+//         PrintIndent();
+//         stream << "#pragma HLS INTERFACE s_axilite port="
+//                << info.name << " "
+//                << "bundle=control\n";
+//       }
+//       PrintIndent();
+//       stream << "#pragma HLS INTERFACE s_axilite"
+//              << " port=return bundle=control\n";
+//     }
+
+//     // function body
+//     int func_scope = BeginScope();
+//     range_ = CollectIterRange(op->body);
+//     PrintStmt(op->body);
+
+//     EndScope(func_scope);
+//     PrintIndent();
+//     stream << "}\n";
+
+//     if (extern_mode) {
+//         stream << "}\n\n";
+//         EndScope(extern_scope);
+//     }
+
+//   // Non-top kernel function 
+//   } else {
+
+//     auto const_size = [&](Array<Expr> shape) -> int32_t {
+//       int32_t res = 1;
+//       for (auto s : shape) {
+//           CHECK(s.as<IntImm>());
+//           auto v = s.as<IntImm>()->value;
+//           res = res * v;
+//       }
+//       return res;
+//     };
+//     std::ostringstream func_os;
+//     func_os << "static void " << op->name << "(";
+//     for (size_t i = 0; i < op->args.size(); ++i) {
+//       VarExpr v = op->args[i];
+//       var_shape_map_[v.get()] = op->arg_shapes[i];
+
+//       int32_t constant_size = const_size(op->arg_shapes[i]);
+//       CHECK_GT(constant_size, 0)
+//           << "Input arg size must be greater than 0...";
+//       buf_length_map_[v.get()] = constant_size;
+//       std::string vid = AllocVarID(v.get());
+//       if (i != 0) func_os << ", ";
+//       std::string str = PrintExpr(op->arg_types[i]);
+//       Type type = String2Type(str);
+
+//       // Scalar input
+//       CHECK_GT(op->arg_shapes[i].size(), 0);
+//       if (op->arg_shapes[i].size() == 1) {
+//         auto dim = op->arg_shapes[i][0].as<IntImm>();
+//         CHECK(dim);
+//         if (dim->value == 1 || dim->value == 0) {
+//             PrintType(type, func_os);
+//             auto info = args_info[i];
+//             if (info.is_written) func_os << "&";
+//             func_os << " " << vid;
+//             continue;
+//         }
+//       }
+
+//       if (op->arg_shapes[i].size() > 0) {
+//         auto shape = op->arg_shapes[i]; 
+//         PrintType(type, func_os);
+//         func_os << " " << vid;
+//         func_os << "[";
+//         for (size_t k = 0; k < shape.size(); k++) {
+//           if (k != shape.size() - 1) func_os << "][";
+//           func_os << shape[k];
+//         }
+//         func_os << "]";
+//       }
+//     }
+//     decl_stream << func_os.str() << ");\n";
+//     stream << func_os.str() << ") {\n";
+    
+//     PrintIndent();
+//     stream << "#pragma HLS inline off\n";
+
+//     // function body
+//     int func_scope = BeginScope();
+//     range_ = CollectIterRange(op->body);
+//     PrintStmt(op->body);
+//     EndScope(func_scope);
+//     PrintIndent();
+//     stream << "}\n\n";
+
+//   }
+
+//   // restore default stream
+//   module_stream << this->stream.str();
+//   this->stream.str("");
+//   this->stream.clear();
+//   this->stream << save.str();
+//   RestoreFuncState(f);
+// }
+
+// void CodeGenSystemC::BindThreadIndex(const IterVar& iv) {
+//   LOG(FATAL) << "Merlin doesn't support thread binding";
+//   return ;
+// }
+
+// void CodeGenSystemC::PrintType(Type t, std::ostream& os) {  // NOLINT(*)
+//   int lanes = t.lanes();
+//   if (t.is_uint()) {
+//     os << "sc_uint <";
+//     os << t.bits();
+//     os << ">";
+//   }
+//   else if (t.is_int()) {
+//     os << "sc_int <";
+//     os << t.bits();
+//     os << ">";
+//   }
+//   else if (t.is_handle()) {
+//     os << "cynw_p2p < sc_uint < ";
+//     os << t.bits();
+//     os << "> >";
+//   }
+//   else
+//     LOG(WARNING) << "Unsupported Data Type " << t << "!" ;
+//   if (lanes > 1)
+//     LOG(WARNING) << "SystemC does not support array interface" ;
+//   return;
+  
+//   // if (t.is_handle()) {
+//   //   //LOG(FATAL) << "The buffer shouldn't call PrintType for printing type";
+//   //   os << "void*";
+//   //   return ;
+//   // }
+//   // bool fail = false;
+//   // if (t.is_float()) {
+//   //   switch (t.bits()) {
+//   //     case 16: os << "half"; break;
+//   //     case 32: os << "float"; break;
+//   //     case 64: os << "double"; break;
+//   //     case 128: os << "double double"; break;
+//   //     default: fail = true; break;
+//   //   }
+//   //   if (!fail && lanes == 1) return;
+//   //   if (!fail && (lanes >= 2 && lanes <= 16)) {
+//   //     os << lanes; return;
+//   //   }
+//   // } else if (t.is_uint() || t.is_int()) {
+//   //   if (t.is_uint()) {
+//   //     os << "unsigned ";
+//   //   }
+//   //   if (t.bits() == 8 && t.lanes() == 4) {
+//   //     // directly 4 8 bit int in integer.
+//   //     os << "int"; return;
+//   //   }
+
+//   //   int target_bit = 1;
+//   //   while (target_bit < t.bits())
+//   //     target_bit <<= 1;
+
+//   //   switch (target_bit) {
+//   //     case 1: os << "int"; break;
+//   //     case 2: os << "char"; break;
+//   //     case 4: os << "char"; break;
+//   //     case 8: os << "char"; break;
+//   //     case 16: os << "short"; break;
+//   //     case 32: os << "int"; break;
+//   //     case 64: os << "long"; break;
+//   //     case 128: os << "long"; break; // FIXME: Should use long long
+//   //     default: fail = true; break;
+//   //   }
+//   //   if (!fail && lanes == 1) return;
+//   //   // FIXME: Not yet support multiple lanes
+//   //   //if (!fail && (lanes >= 2 && lanes <= 16)) {
+//   //   //  os << lanes; return;
+//   //   //}
+//   // }
+//   // os << t;
+//   // LOG(WARNING) << "Cannot convert type " << t ;
+//   return ;
+// }
+
+// void CodeGenSystemC::PrintVecAddr(const Variable* buffer, Type t,
+//                                  Expr base, std::ostream& os) {  // NOLINT(*)
+//   // FIXME: What's this node for?
+//   if (!HandleTypeMatch(buffer, t.element_of())) {
+//     os << '(';
+//     auto it = alloc_storage_scope_.find(buffer);
+//     if (it != alloc_storage_scope_.end()) {
+//       PrintStorageScope(it->second, os);
+//     }
+//     os << ' ';
+//     PrintType(t.element_of(), os);
+//     os << "*)";
+//   }
+//   os << GetVarID(buffer) << " + ";
+//   PrintExpr(base, os);
+//   return ;
+// }
+
+// void CodeGenSystemC::PrintVecStore(const Variable* buffer,
+//                                   Type t, Expr base,
+//                                   const std::string& value) {
+//   // FIXME: What's this node for?
+//   this->PrintIndent();
+//   stream << "vstore" << t.lanes() << "(" << value << ", 0, ";
+//   PrintVecAddr(buffer, t, base, stream);
+//   stream << ");\n";
+//   return ;
+// }
+
+// void CodeGenSystemC::PrintStorageSync(const Call* op) {
+//   const std::string& sync = op->args[0].as<StringImm>()->value;
+//   if (sync == "warp") {
+//     LOG(FATAL) << "warp sync not supported in Merlin";
+//   } else if (sync == "shared") {
+//     LOG(FATAL) << "shared sync not supported in Merlin";
+//   } else if (sync == "global") {
+//     LOG(FATAL) << "global sync not supported in Merlin";
+//   }
+//   return ;
+// }
+
+// void CodeGenSystemC::VisitExpr_(const Load* op, std::ostream& os) {
+//   std::string vid = GetVarID(op->buffer_var.get());
+//   // TODO: find a betetr way to track streaming channels 
+//   if (top_args.find(vid) != top_args.end()) {
+//     PrintIndent(); 
+//     stream << vid << "_temp = " << vid << ".read_nb();\n";
+//     os << vid << "_temp.get_data()";
+//   } else {
+//     CodeGenC::VisitExpr_(op, os);
+//   }
+// }
+
+// void CodeGenSystemC::VisitStmt_(const Store* op) {
+//   std::string vid = GetVarID(op->buffer_var.get());
+//   if (top_args.find(vid) != top_args.end()) {
+//     auto value = PrintExpr(op->value);
+//     auto bits = handle_data_type_[op->buffer_var.get()].bits();
+//     PrintIndent(); 
+//     stream << "pkt_b" << bits << " " << vid <<  "_temp;\n";
+//     PrintIndent(); 
+//     stream << vid <<  "_temp.set_data(" << value << ");\n";
+//     PrintIndent(); 
+//     stream << vid <<  "_temp.set_keep(-1);\n";
+//     PrintIndent(); 
+//     stream << vid << ".write(" << vid << "_temp);\n";
+//     return;
+//   }
+
+//   // handle SetSlice
+//   if (const SetSlice* ss = op->value.as<SetSlice>()) {
+//     Type t = op->value.type();
+//     Expr new_index_left = ir::Simplify(ss->index_left - 1);
+//     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+//     std::string rhs = PrintExpr(ss->value);
+//     PrintIndent();
+//     this->stream << ref
+//                  << "(" << PrintExpr(new_index_left) << ", " << PrintExpr(ss->index_right)
+//                  << ") = " << rhs << ";\n";
+//   } else if (const SetBit* sb = op->value.as<SetBit>()) {
+//     Type t = op->value.type();
+//     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+//     PrintIndent();
+//     this->stream << ref
+//                  << "[" << PrintExpr(sb->index)
+//                  << "] = " << PrintExpr(sb->value) << ";\n";
+//   } else if (auto expr_op = op->value.as<Select>()) {
+//     Type t = op->value.type();
+//     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+//     PrintIndent();
+//     this->stream << "if (" << PrintExpr(expr_op->condition) << ") { \n";
+//     PrintIndent();
+//     this->stream << "  " << ref 
+//         << " = " << PrintExpr(expr_op->true_value) << ";\n";
+//     PrintIndent();
+//     this->stream << "} else { \n";
+//     PrintIndent();
+//     this->stream << "  " << ref 
+//         << " = " << PrintExpr(expr_op->false_value) << ";\n";
+//     PrintIndent();
+//     this->stream << "}\n";
+//   } else {
+//     CodeGenC::VisitStmt_(op);
+//   }
+// }
+
+// void CodeGenSystemC::PrintStorageScope(
+//     const std::string& scope, std::ostream& os) { // NOLINT(*)
+//     return ;
+// }
+
+// void CodeGenSystemC::VisitExpr_(const Broadcast* op, std::ostream& os) { // NOLINT(*)
+//   std::string v = PrintExpr(op->value);
+//   os << "((";
+//   PrintType(op->type, os);
+//   os << ")(";
+//   for (int i = 0; i < op->lanes; ++i) {
+//     if (i != 0) os << ", ";
+//     os << v;
+//   }
+//   os << "))";
+//   return ;
+// }
+
+// void CodeGenSystemC::VisitStmt_(const LetStmt* op) {
+//   std::string value = PrintExpr(op->value);
+//   // Skip the argument retrieving assign statement
+//   std::string vid = AllocVarID(op->var.get());
+//   if (op->var.type() != Handle() &&
+//       value.find("TVMArray") == std::string::npos &&
+//       value.find("arg") != 0) {
+//     PrintIndent();
+//     PrintType(op->var.type(), this->stream);
+//     this->stream << ' '
+//                  << vid
+//                  << " = " << value << ";\n";
+//   }
+//   PrintStmt(op->body);
+// }
+
+// void CodeGenSystemC::GenForStmt(const For* op, std::string pragma, bool before) {
+//   std::string extent = PrintExpr(op->extent);
+//   std::string vid = AllocVarID(op->loop_var.get());
+//   CHECK(is_zero(op->min));
+//   if (before && pragma.length() > 0) {
+//     PrintIndent();
+//     stream << pragma;
+//   }
+//   PrintIndent();
+
+//   // print loop labels
+//   bool loop_stage_name = false;
+//   for (unsigned int i = 0; i < op->annotate_keys.size(); i++) {
+//     if (auto str = op->annotate_keys[i].as<StringImm>()) {
+//       if (str->value == "stage_name") {
+//         loop_stage_name = true;
+//         auto label = op->annotate_values[i].as<StringImm>();
+//         std::string output_label;
+//         if (label->value == "") {
+//           output_label = vid;
+//         } else {
+//           output_label = label->value + "_" + vid;
+//         }
+//         for (size_t i = 0; i < output_label.size(); ++i) {
+//           if (output_label[i] == '.') output_label[i] = '_';
+//         }
+//         stream << output_label << ": ";
+//         break;
+//       }
+//     }
+//   }
+//   if (!loop_stage_name)
+//     stream << vid << ": ";
+
+//   stream << "for (";
+//   PrintType(op->loop_var.type(), stream);
+//   stream << ' ' << vid << " = 0; "
+//             << vid << " < " << extent
+//             << "; ++" << vid << ") {\n";
+//   if (!before && pragma.length() > 0) {
+//     PrintIndent();
+//     stream << pragma;
+//   }
+//   int for_scope = BeginScope();
+//   PrintStmt(op->body);
+//   this->EndScope(for_scope);
+//   PrintIndent();
+//   stream << "}\n";
+// }
+
+// void CodeGenSystemC::VisitStmt_(const For* op) {
+//   std::ostringstream os;
+
+//   Stmt stmt = op->body;
+//   while (const For* for_op = stmt.as<For>())
+//     stmt = for_op->body;
+
+//   // Skip for-loops for all 0 assignment 
+//   if (auto st = stmt.as<Store>()) {
+//     auto value = st->value;
+//     if (auto c = value.as<Cast>()) value = c->value;
+//     if (auto v = value.as<IntImm>()) {
+//       if (v->value == 0) return;
+//     } else if (auto v = value.as<FloatImm>()) {
+//       if (v->value == 0) return;
+//     } else if (auto v = value.as<UIntImm>()) {
+//       if (v->value == 0) return;
+//     }
+//   }
+
+//   if (op->for_type == ForType::Unrolled) {
+//     int unroll_factor = 0, i = 0;
+//     for (auto key : op->annotate_keys) {
+//       if (auto str = key.as<StringImm>()) {
+//         auto factor = op->annotate_values[i].as<IntImm>();
+//         if (str->value == "factor" && factor != nullptr && factor->value > 1) {
+//           unroll_factor = factor->value;
+//           break;
+//         }
+//       }
+//       i++;
+//     }
+//     os << "#pragma HLS unroll";
+//     if (unroll_factor > 0) os << " factor=" << unroll_factor << "\n";
+//     else                   os << "\n";
+//   }
+//   else if (op->for_type == ForType::Pipelined) {
+//     int II = 0, i = 0;
+//     for (auto key : op->annotate_keys) {
+//       if (auto str = key.as<StringImm>()) {
+//         auto initiation_interval = op->annotate_values[i].as<IntImm>();
+//         if (str->value == "initiation_interval" &&
+//             initiation_interval != nullptr &&
+//             initiation_interval->value > 1) {
+//           II = initiation_interval->value;
+//           break;
+//         }
+//       }
+//       i++;
+//     }
+//     os << "#pragma HLS pipeline";
+//     if (II > 0) os << " II=" << II << "\n";
+//     else        os << "\n";
+//   }
+//   GenForStmt(op, os.str(), false);
+// }
+
+// void CodeGenSystemC::VisitStmt_(const IfThenElse* op) {
+//   std::string cond = PrintExpr(op->condition);
+
+//   // Skip the buffer data checking
+//   if (std::regex_match(cond, std::regex("!\\((arg)(.+)(== NULL)\\)")))
+//       return ;
+
+//   PrintIndent();
+//   if (cond[0] == '(' && cond[cond.length() - 1] == ')') {
+//     stream << "if " << cond << " {\n";
+//   } else {
+//     stream << "if (" << cond << ") {\n";
+//   }
+//   int then_scope = BeginScope();
+//   PrintStmt(op->then_case);
+//   this->EndScope(then_scope);
+
+//   if (op->else_case.defined()) {
+//     PrintIndent();
+//     stream << "} else {\n";
+//     int else_scope = BeginScope();
+//     PrintStmt(op->else_case);
+//     this->EndScope(else_scope);
+//   }
+//   PrintIndent();
+//   stream << "}\n";
+// }
+// }  // namespace codegen
+// }  // namespace TVM
+
+
 /*!
- *  Copyright (c) 2017 by Contributors
- * \file codegen_systemc.cc
+ *  Copyright (c) 2018 by Contributors
+ * \file codegen_vhls.cc
  */
-#include <tvm/runtime/config.h>
-#include <tvm/packed_func_ext.h>
+/*#include <tvm/build_module.h>
+#include <tvm/runtime/registry.h>
 #include <tvm/ir_pass.h>
+#include <tvm/ir_visitor.h>
 #include <vector>
 #include <string>
-#include <tuple>
 #include <regex>
+#include <fstream>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include "./codegen_systemc.h"
-#include "../../runtime/thread_storage_scope.h"
+#include "../build_common.h"
+#include "../build_soda.h"
+#include "../codegen_soda.h"
+#include "../../pass/stencil.h"
 
 namespace TVM {
 namespace codegen {
@@ -24,41 +743,45 @@ struct argInfo {
   bool            is_written;
 };
 
-CodeGenSystemC::CodeGenSystemC() {
-  restrict_keyword_ = "restrict"; // FIXME: Check if this is useful
-  return ;
-}
-
-// assign "global" to all array types?
-void CodeGenSystemC::InitFuncState(LoweredFunc f) {
-  CodeGenC::InitFuncState(f);
-  for (Var arg : f->args) {
-    if (arg.type().is_handle()) {
-      alloc_storage_scope_[arg.get()] = "global";
-    }
-  }
-  return ;
-}
+std::ofstream dut_header;
+std::ofstream dut_file;
+std::ofstream define_header;
 
 void CodeGenSystemC::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
-  // Clear previous generated state
+
+  // open files
+  dut_header.open("dut.h");
+  dut_file.open("dut.cc");
+  define_header.open("defines.h");
+
+  // write header files
+  this->decl_stream << "#ifndef DUT_H\n";
+  this->decl_stream << "#define DUT_H\n\n";
+  this->decl_stream << "#include <cynw_p2p.h>\n\n";
+
+  dut_header << "#ifndef DUT_H\n";
+  dut_header << "#define DUT_H\n\n";
+  dut_header << "#include <cynw_p2p.h>\n\n";
+
+  // setup codegen mode
+  if (map_arg_type.count("sdsoc")) {
+    sdsoc_mode = true;
+    this->decl_stream << "#include \"sds_lib.h\"\n\n";
+  } else if (map_arg_type.count("sdaccel")) {
+    extern_mode = true;
+    this->decl_stream << "\n";
+  }
+
+  // clear previous generated state.
   this->InitFuncState(f);
-
-  // Skip the first underscore, so SSA variable starts from _1
-  GetUniqueName("_");
-
-  // Register alloc buffer type
+  map_arg_type_ = map_arg_type;
+  // add to alloc buffer type.
   for (const auto & kv : f->handle_data_type) {
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
 
-  // Write header files
-  this->stream << "#ifndef DUT_H\n";
-  this->stream << "#define DUT_H\n\n";
-  this->stream << "#include <cynw_p2p.h>\n";
-  this->stream << "#include \"defines.h\"\n";
-
+  HCL_DEBUG_LEVEL(2) << "Adding SystemC Kernel...";
   // Write entry function name
   this->stream << "SC_MODULE( " << f->name << " ) \n{\n";
   this->stream << "public:\n";
@@ -67,46 +790,456 @@ void CodeGenSystemC::AddFunction(LoweredFunc f,
   this->PrintIndent();
   this->stream << "sc_in< bool > rst;\n";
 
-  // Write arguments
-  // All args are Cadence Stratus Streaming dtype
+  dut_header << "SC_MODULE( " << f->name << " ) \n{\n";
+  dut_header << "public:\n";
+  dut_header << "sc_in< bool > clk;\n";
+  dut_header << "sc_in< bool > rst;\n";
+
+  // generate top function signature
+  this->stream << "void " << f->name << "(";
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
-    // auto attr = f->attributes[i];
     std::string vid = AllocVarID(v.get());
-    // if (i != 0) this->stream << ", ";
+    if (i != 0) stream << ", ";
+    // check type in the arg map
     if (map_arg_type.find(vid) == map_arg_type.end()) {
       LOG(WARNING) << vid << " type not found\n";
       PrintType(v.type(), this->stream);
       this->stream << ' ' << vid;
-    }
-    else {
+    } else {
       auto arg = map_arg_type[vid];
-      this->stream << "cynw_p2p < ";
-      PrintType(v.type(), this->stream);
-      this->stream << " >::in ";
-      this->stream << std::get<0>(arg);
-      this->stream << ";\n";
-      top_args.insert(std::get<0>(arg));
+      PrintType(std::get<1>(arg), this->stream);
+      // this->stream << "* " << std::get<0>(arg);
+      const BufferNode* buf = f->api_args[i].as<BufferNode>();
+      if (v.type().is_handle() && buf) {
+        var_shape_map_[buf->data.get()] = buf->shape;
+        auto it = alloc_storage_scope_.find(v.get());
+        if (it != alloc_storage_scope_.end()) {
+          PrintStorageScope(it->second, stream);
+        }
+        this->stream << " " << std::get<0>(arg);
+
+        // print multi-dim array
+        this->stream << "[";
+        int count = 0;
+        for (auto& s : buf->shape) {
+          if (count != 0) this->stream << "][";
+          this->stream << s;
+          count = count + 1;
+        }
+        this->stream << "]";
+      } else {
+        this->stream << " " << std::get<0>(arg);
+      }
     }
   }
-  this->stream << "\nSC_CTOR( " << f->name << " ): \n";
-  this->stream << "clk ( \"clk\" ), \n";
-  this->stream << "rst ( \"rst\" ), \n";
-  this->stream << "\n{";
+
+  stream << ") {\n";
   int func_scope = this->BeginScope();
+  range_ = CollectIterRange(f->body);
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
   this->stream << "}\n\n";
+
+  dut_header.close();
+  dut_file.close();
+  define_header.close();
+
+  // close soda header handle
+  if (soda_header_.is_open())
+    soda_header_.close();
+
 }
 
-std::string CodeGenSystemC::Finish() {
-  return CodeGenC::Finish();
+void CodeGenSystemC::PrintType(Type t, std::ostream& os) {
+  int lanes = t.lanes();
+  if (t.is_uint()) {
+    os << "sc_uint <";
+    os << t.bits();
+    os << ">";
+  }
+  else if (t.is_int()) {
+    os << "sc_int <";
+    os << t.bits();
+    os << ">";
+  }
+  else if (t.is_handle()) {
+    os << "cynw_p2p < sc_uint < ";
+    os << t.bits();
+    os << "> >";
+  }
+  else
+    LOG(WARNING) << "Unsupported Data Type " << t << "!" ;
+  if (lanes > 1)
+    LOG(WARNING) << "SystemC does not support array interface" ;
+  return;
+  // if (t.is_uint() || t.is_int() || t.is_fixed() || t.is_ufixed()) {
+  //   if (t.is_uint()) {
+  //     os << "ap_uint<" << t.bits() << ">";
+  //   } else if (t.is_int()) {
+  //     os << "ap_int<" << t.bits() << ">";
+  //   } else if (t.is_ufixed()) {
+  //     os << "ap_ufixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+  //   } else {
+  //     os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+  //   }
+  // } else {
+  //   CodeGenC::PrintType(t, os);
+  // }
 }
+
+void CodeGenSystemC::VisitExpr_(const Min *op, std::ostream& os) {  // NOLINT(*)
+  os << "hls::min(";
+  PrintExpr(op->a, os);
+  os << ", ";
+  PrintExpr(op->b, os);
+  os << ")";
+}
+
+void CodeGenSystemC::VisitExpr_(const Max *op, std::ostream& os) {  // NOLINT(*)
+  os << "hls::max(";
+  PrintExpr(op->a, os);
+  os << ", ";
+  PrintExpr(op->b, os);
+  os << ")";
+}
+
+void CodeGenSystemC::VisitExpr_(const GetBit* op, std::ostream& os) {
+  PrintExpr(op->a, os);
+  os << "[";
+  PrintExpr(op->index, os);
+  os << "]";
+}
+
+void CodeGenSystemC::VisitExpr_(const GetSlice* op, std::ostream& os) {
+  PrintExpr(op->a, os);
+  os << "(";
+  Expr new_index_left = ir::Simplify(op->index_left - 1);
+  PrintExpr(new_index_left, os);
+  os << ", ";
+  PrintExpr(op->index_right, os);
+  os << ")";
+}
+
+void CodeGenSystemC::VisitExpr_(const Load* op, std::ostream& os) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  // TODO: find a betetr way to track streaming channels 
+  if (stream_vars.find(vid) != stream_vars.end()) {
+    PrintIndent(); 
+    stream << vid << "_temp = " << vid << ".read();\n";
+    os << vid << "_temp.get_data()";
+  } else {
+    CodeGenC::VisitExpr_(op, os);
+  }
+}
+
+void CodeGenSystemC::VisitStmt_(const Store* op) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  if (stream_vars.find(vid) != stream_vars.end()) {
+    PrintIndent(); 
+    auto bits = handle_data_type_[op->buffer_var.get()].bits();
+    stream << "pkt_b" << bits << " " << vid <<  "_temp;\n";
+    PrintIndent(); 
+    stream << vid <<  "_temp.set_data(" << PrintExpr(op->value) << ");\n";
+    PrintIndent(); 
+    stream << vid <<  "_temp.set_keep(-1);\n";
+    PrintIndent(); 
+    stream << vid << ".write(" << vid << "_temp);\n";
+    return;
+  }
+
+  // handle SetSlice
+  if (const SetSlice* ss = op->value.as<SetSlice>()) {
+    Type t = op->value.type();
+    Expr new_index_left = ir::Simplify(ss->index_left - 1);
+    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+    std::string rhs = PrintExpr(ss->value);
+    PrintIndent();
+    this->stream << ref
+                 << "(" << PrintExpr(new_index_left) << ", " << PrintExpr(ss->index_right)
+                 << ") = " << rhs << ";\n";
+  } else if (const SetBit* sb = op->value.as<SetBit>()) {
+    Type t = op->value.type();
+    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+    PrintIndent();
+    this->stream << ref
+                 << "[" << PrintExpr(sb->index)
+                 << "] = " << PrintExpr(sb->value) << ";\n";
+  } else if (auto expr_op = op->value.as<Select>()) {
+    Type t = op->value.type();
+    std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
+    PrintIndent();
+    this->stream << "if (" << PrintExpr(expr_op->condition) << ") { \n";
+    PrintIndent();
+    this->stream << "  " << ref 
+        << " = " << PrintExpr(expr_op->true_value) << ";\n";
+    PrintIndent();
+    this->stream << "} else { \n";
+    PrintIndent();
+    this->stream << "  " << ref 
+        << " = " << PrintExpr(expr_op->false_value) << ";\n";
+    PrintIndent();
+    this->stream << "}\n";
+  } else {
+    CodeGenC::VisitStmt_(op);
+  }
+}
+
+void CodeGenSystemC::VisitExpr_(const Call *op, std::ostream& os) {  // NOLINT(*)
+  if ((op->call_type == Call::Extern ||
+      op->call_type == Call::PureExtern) || op->name == "sqrt") {
+    os << "sqrt(";
+    for (size_t i = 0; i < op->args.size(); i++) {
+      this->PrintExpr(op->args[i], os);
+      if (i < op->args.size() - 1) {
+        os << ", ";
+      }
+    }
+    os << ")";
+  } else {
+    CodeGenC::VisitExpr_(op, os);
+  }
+}
+
+void CodeGenSystemC::VisitStmt_(const Allocate* op) {
+  CHECK(!is_zero(op->condition));
+  std::string vid = AllocVarID(op->buffer_var.get());
+
+
+  if (op->new_expr.defined()) {
+    CHECK_EQ(op->free_function, "nop");
+    std::string new_data = PrintExpr(op->new_expr);
+    this->PrintIndent();
+    PrintType(op->type, stream);
+    stream << "* "<< vid << '=' << new_data << ";\n";
+  } else {
+    int32_t constant_size = op->constant_allocation_size();
+    CHECK_GT(constant_size, 0)
+        << "Can only handle constant size stack allocation for now";
+    const Variable* buffer = op->buffer_var.as<Variable>();
+    var_shape_map_[buffer] = op->extents;
+
+    std::string scope; // Allocate on local scope by default
+    auto it = alloc_storage_scope_.find(buffer);
+    if (it != alloc_storage_scope_.end())
+      scope = alloc_storage_scope_.at(buffer);
+    else scope = "local";
+
+    // FIFO Checking 
+    bool is_fifo = false;
+    for (auto attr : op->attrs) {
+      if (attr.as<StreamStmt>()) {
+        is_fifo = true;
+      }
+    }
+    // Auto-apply dataflow
+    if (is_fifo) {
+      if (stream.str().find("#pragma HLS dataflow") == std::string::npos) {
+        LOG(INFO) << "Auto-applying dataflow optimization...";
+        PrintIndent();
+        stream << "#pragma HLS dataflow\n";
+      }
+    }
+
+    this->PrintIndent();
+    // Skip partitioned stage
+    if (vid.find("_partitioned") == std::string::npos) {
+      if (constant_size > 1) { // Transfer length one array to scalar
+        if (sdsoc_mode) {
+          // Allocate continuous physical mem
+          PrintType(op->type, stream);
+          stream << "* " << vid << " = (";
+          PrintType(op->type, stream);
+          stream << " *)sds_alloc(sizeof(";
+          PrintType(op->type, stream);
+          stream << ")";
+
+          for (auto& v : op->extents) {
+            stream << "*" << v;
+          }
+          stream << ")";
+        } else {
+          if (is_fifo) {
+            stream << "hls::stream<";
+            PrintType(op->type, stream);
+            stream << " > " << vid;
+
+            // Not FIFO channels
+          } else {
+            if (vid.find("_reuse") != std::string::npos) {
+              PrintType(op->type, stream);
+              stream << ' '<< vid;
+              for (size_t i = 0; i < op->extents.size(); i++) {
+                stream << '[';
+                PrintExpr(op->extents[i], stream);
+                stream << "]";
+              }
+            } else {
+              if (sdsoc_mode) {
+                // allocate continuous phy mem
+                PrintType(op->type, stream);
+                stream << "* " << vid << " = (";
+                PrintType(op->type, stream);
+                stream << " *)sds_alloc(sizeof(";
+                PrintType(op->type, stream);
+                stream << ")";
+
+                for (auto& v : op->extents) {
+                  stream << "*" << v;
+                }
+                stream << ")";
+              } else {
+                PrintType(op->type, stream);
+                stream << ' '<< vid;
+                // stream << '[' << constant_size << "]";
+                for (size_t i = 0; i < op->extents.size(); i++) {
+                  stream << '[';
+                  PrintExpr(op->extents[i], stream);
+                  stream << "]";
+                }
+                if (!op->init_values.empty()) {
+                  stream << " = ";
+                  if (constant_size == 1) PrintExpr(op->init_values[0], stream);
+                  else {
+                    std::vector<size_t> extents;
+                    for (size_t i = 0; i < op->extents.size(); i++) {
+                      const int64_t* extent = as_const_int(op->extents[i]);
+                      CHECK(extent != nullptr) << "Extent of an init array cannot be a variable\n";
+                      extents.push_back(*extent);
+                    }
+                    PrintArray(op->init_values, extents, stream, 0, 0);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        PrintType(op->type, stream);
+        stream << ' ' << vid;
+      }
+    }
+    stream << ";\n";
+    for (size_t i = 0; i < op->attrs.size(); i++) 
+      this->PrintStmt(op->attrs[i]);
+    buf_length_map_[buffer] = constant_size;
+  }
+  RegisterHandleType(op->buffer_var.get(), op->type);
+  this->PrintStmt(op->body);
+}
+
+void CodeGenSystemC::VisitStmt_(const For* op) {
+  std::ostringstream os;
+
+  Stmt stmt = op->body;
+  while (const For* for_op = stmt.as<For>())
+    stmt = for_op->body;
+
+  if (op->for_type == ForType::Unrolled) {
+    int unroll_factor = 0, i = 0;
+    for (auto key : op->annotate_keys) {
+      if (auto str = key.as<StringImm>()) {
+        auto factor = op->annotate_values[i].as<IntImm>();
+        if (str->value == "factor" && factor != nullptr && factor->value > 1) {
+          unroll_factor = factor->value;
+          break;
+        }
+      }
+      i++;
+    }
+    os << "#pragma HLS unroll";
+    if (unroll_factor > 0) os << " factor=" << unroll_factor << "\n";
+    else                   os << "\n";
+  }
+  else if (op->for_type == ForType::Pipelined) {
+    int II = 0, i = 0;
+    for (auto key : op->annotate_keys) {
+      if (auto str = key.as<StringImm>()) {
+        auto initiation_interval = op->annotate_values[i].as<IntImm>();
+        if (str->value == "initiation_interval" &&
+            initiation_interval != nullptr &&
+            initiation_interval->value > 1) {
+          II = initiation_interval->value;
+          break;
+        }
+      }
+      i++;
+    }
+    os << "#pragma HLS pipeline";
+    if (II > 0) os << " II=" << II << "\n";
+    else        os << "\n";
+  }
+  GenForStmt(op, os.str(), false);
+}
+
+void CodeGenSystemC::VisitStmt_(const Partition* op) {
+  PrintIndent();
+  stream << "#pragma HLS array_partition variable=";
+  std::string vid = GetVarID(op->buffer_var.get());
+  stream << vid << " ";
+  switch (op->partition_type) {
+    case PartitionType::Complete:
+      stream << "complete";
+      break;
+    case PartitionType::Block:
+      stream << "block";
+      break;
+    case PartitionType::Cyclic:
+      stream << "cyclic";
+      break;
+  }
+  stream << " dim=" << op->dim;
+  if (op->partition_type != PartitionType::Complete) {
+    stream << " factor=" << op->factor;
+  }
+  stream << "\n";
+}
+
+void CodeGenSystemC::VisitExpr_(const StreamExpr* op, std::ostream& os) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  os << vid << ".read()";
+}
+
+void CodeGenSystemC::VisitStmt_(const ExternModule* op) {
+  PrintIndent();
+  if (const auto* f = runtime::Registry::Get("process_extern_module")) {
+    std::string code;
+    code = (*f)(op->annotate_keys, op->annotate_values).operator std::string();
+    HCL_DEBUG_LEVEL(2) << code;
+    stream << code;
+  }
+}
+
+void CodeGenSystemC::VisitStmt_(const StreamStmt* op) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  PrintIndent();
+  if (op->stream_type == StreamType::ATTR) {
+    stream << "#pragma HLS stream variable=" << vid << " depth=" << op->depth << "\n";
+  } else {
+    stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
+  }
+}
+
+class AllocateCollector final : public IRVisitor {
+  public:
+    AllocateCollector(std::vector<const Allocate*>& alloc_list,
+                      VarExprUnorderedSet& outputs)
+      : alloc_list_(alloc_list), outputs_(outputs) {}
+
+    void Visit_(const Allocate* op) {
+      if (outputs_.count(op->buffer_var))
+        alloc_list_.push_back(op);
+      this->Visit(op->body);
+    }
+
+  private:
+    std::vector<const Allocate*>& alloc_list_;
+    VarExprUnorderedSet& outputs_;
+};
 
 void CodeGenSystemC::VisitStmt_(const KernelStmt *op) {
   PrintIndent();
-  this->stream << "entered KernelDef\n";
   stream << op->name << "(";
 
   // Extract annotation values
@@ -126,11 +1259,9 @@ void CodeGenSystemC::VisitStmt_(const KernelStmt *op) {
 void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
   LoweredFunc f;
   // save func states
-  this->stream << "entered KernelDef\n";
   CodeGenC::SaveFuncState(f);
   CodeGenC::InitFuncState(f);
   std::ostringstream save;
-  std::ostringstream pragma;
   save << this->stream.str();
   this->stream.str("");
   this->stream.clear();
@@ -146,7 +1277,26 @@ void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
   std::vector<argInfo> args_info;
   bool is_kernel_func = false;
   for (size_t i = 0; i < op->attributes.size(); i++) {
+    // VarExpr v = op->args[i];
+    // std::string str = PrintExpr(op->arg_types[i]);
+    // Type type = String2Type(str);
     auto info = op->attributes[i];
+    // bool is_written = info[5].as<IntImm>()->value == 1 ? true : false;
+    // dut_header << "cynw_p2p < ";
+    // stream << "cynw_p2p < ";
+    // PrintType(type, this->stream);
+    // dut_header << " >::";
+    // stream << " >::";
+    // if (is_written) {
+    //   dut_header << "out";
+    //   stream << "out";
+    // }
+    // else {
+    //   dut_header << "in ";
+    //   stream << "in ";
+    // }
+    // dut_header << info[0] << ";\n";
+    // stream << info[0] << ";\n";
     CHECK(info.size() >=2);
     auto arg_name = info[0].as<StringImm>()->value;
     for (size_t i = 0; i < arg_name.size(); ++i) {
@@ -171,6 +1321,7 @@ void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
         args_info.push_back(arg_info);
     }
   }
+  
 
   // print top-level kernel function
   if (is_kernel_func) {
@@ -351,12 +1502,249 @@ void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
   RestoreFuncState(f);
 }
 
-void CodeGenSystemC::BindThreadIndex(const IterVar& iv) {
-  LOG(FATAL) << "Merlin doesn't support thread binding";
-  return ;
+void CodeGenSystemC::VisitStmt_(const Stencil* op) {
+  // Use SODA codegen for stencil analysis
+  CodeGenSODA cg_soda;
+  cg_soda.Init(false);
+  VarExprUnorderedSet inputs;
+  VarExprUnorderedSet outputs;
+  for (size_t i = 0; i < op->inputs.size(); i++)
+    inputs.insert(op->inputs[i]);
+  for (size_t i = 0; i < op->outputs.size(); i++) {
+    outputs.insert(op->outputs[i]);
+  }
+  std::vector<const Allocate*> alloc_list;
+  AllocateCollector collector(alloc_list, outputs);
+  collector.Visit(op->body);
+  std::string kernel_name;
+  cg_soda.PrintSODA(op, &kernel_name);
+  std::string code = cg_soda.Finish();
+
+  // Generate SODA HLSC code
+  SODA2HLSC(code);
+
+  PrintIndent();
+  // Create a new file for the stencil function if not exists
+  if (!soda_header_.is_open()) {
+    soda_header_.open("soda_stencil.h");
+    stream << "#include \"soda_stencil.h\"\n";
+  }
+  // Allocate output tensors if needed
+  for (size_t i = 0; i < alloc_list.size(); i++) {
+    auto alloc = alloc_list[i];
+    PrintIndent();
+    PrintType(alloc->type, stream);
+    std::string vid = AllocVarID(alloc->buffer_var.get());
+    stream << ' ' << vid;
+    const Variable* buffer = alloc->buffer_var.as<Variable>();
+    var_shape_map_[buffer] = alloc->extents;
+    for (size_t j = 0; j < alloc->extents.size(); j++) {
+      stream << '[';
+      PrintExpr(alloc->extents[j], stream);
+      stream << ']';
+    }
+    stream << ";\n";
+  }
+  // Print the function call to SODA function
+  PrintIndent();
+  soda_header_ << "void " + kernel_name + "(";
+  stream << kernel_name + "(";
+  for (size_t i = 0; i < op->inputs.size(); i++) {
+    PrintType(cg_soda.var_type_map_[op->inputs[i].get()], soda_header_);
+    soda_header_ << "* ";
+    PrintExpr(op->inputs[i], soda_header_);
+    PrintExpr(op->inputs[i], stream);
+    soda_header_ << ", ";
+    stream << ", ";
+  }
+  for (size_t i = 0; i < op->outputs.size(); i++) {
+    PrintType(cg_soda.var_type_map_[op->outputs[i].get()], soda_header_);
+    soda_header_ << "* ";
+    PrintExpr(op->outputs[i], soda_header_);
+    PrintExpr(op->outputs[i], stream);
+    if (i < op->outputs.size()-1) {
+      soda_header_ << ", ";
+      stream << ", ";
+    }
+  }
+  soda_header_ << ");\n";
+  stream << ");\n";
+
+  // Generate SODA HLSC code
+  std::ofstream soda_file;
+  soda_file.open(kernel_name+".cpp");
+  soda_file << "#include \"soda_stencil.h\"\n";
+  soda_file << code;
+  soda_file.close();
 }
 
-void CodeGenSystemC::PrintType(Type t, std::ostream& os) {  // NOLINT(*)
+}  // namespace codegen
+}  // namespace TVM
+*/
+/*!
+ *  Copyright (c) 2018 by Contributors
+ * \file codegen_vhls.cc
+ */
+#include <tvm/build_module.h>
+#include <tvm/runtime/registry.h>
+#include <tvm/ir_pass.h>
+#include <tvm/ir_visitor.h>
+#include <vector>
+#include <string>
+#include <regex>
+#include <fstream>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include "./codegen_systemc.h"
+#include "../build_common.h"
+#include "../build_soda.h"
+#include "../codegen_soda.h"
+#include "../../pass/stencil.h"
+
+namespace TVM {
+namespace codegen {
+
+using std::string;
+using std::vector;
+using std::unordered_map;
+using std::unordered_set;
+
+struct argInfo {
+  std::string     name;
+  StorageType     mem_type;
+  int             mem_port;
+  StreamType      stream_type;
+  int             channel_depth;
+  bool            is_written;
+};
+
+class InputDirectionCollector : public IRMutator {
+ public:
+  explicit InputDirectionCollector(
+    const Array<VarExpr>& _input_vars) : input_vars(_input_vars) { }
+
+  Stmt Mutate_(const Store* op, const Stmt& s) {
+    Stmt stmt = IRMutator::Mutate_(op, s);
+    op = stmt.as<Store>();
+    if (checkBuffer(op->buffer_var)) {
+        is_arg_written[op->buffer_var.get()->name_hint] = true;
+    }
+    return stmt;
+  }
+
+  bool checkBuffer(VarExpr var) {
+    for (auto& v : input_vars) {
+      if (v.get() == var.get()) {
+        HCL_DEBUG_LEVEL(2) << "[ INFO ] Buffer arg "
+            << v.get()->name_hint << " is written...";
+        return true;
+      }
+    }
+    return false;
+  }
+
+  unordered_map<string, bool>& Analyze(Stmt stmt) {
+    for (auto& v : input_vars) {
+      is_arg_written[v.get()->name_hint] = false;
+    }
+    Stmt s = Mutate(stmt);
+    return is_arg_written; 
+  }
+
+  const Array<VarExpr>& input_vars;
+  unordered_map<string, bool> is_arg_written;
+};
+
+std::ofstream dut_header;
+std::ofstream dut_file;
+std::ofstream define_header;
+
+void CodeGenSystemC::AddFunction(LoweredFunc f,
+        str2tupleMap<std::string, Type> map_arg_type) {
+  // open files
+  dut_header.open("dut.h");
+  dut_file.open("dut.cc");
+  define_header.open("defines.h");
+
+  // write header files
+  this->stream << "#ifndef DUT_H\n";
+  this->stream << "#define DUT_H\n\n";
+  this->stream << "#include <cynw_p2p.h>\n\n";
+  dut_header << "#ifndef DUT_H\n";
+  dut_header << "#define DUT_H\n\n";
+  dut_header << "#include <cynw_p2p.h>\n\n";
+
+  // setup codegen mode
+  // if (map_arg_type.count("sdsoc")) {
+  //   sdsoc_mode = true;
+  //   this->decl_stream << "#include \"sds_lib.h\"\n\n";
+  // } else if (map_arg_type.count("sdaccel")) {
+  //   extern_mode = true;
+  //   this->decl_stream << "\n";
+  // }
+
+  // clear previous generated state.
+  this->InitFuncState(f);
+  // map_arg_type_ = map_arg_type;
+  // add to alloc buffer type.
+  for (const auto & kv : f->handle_data_type) {
+    RegisterHandleType(kv.first.get(), kv.second.type());
+  }
+
+  HCL_DEBUG_LEVEL(2) << "Adding SystemC function...";
+  this->stream << "SC_MODULE( " << f->name << " ) \n{\n";
+  this->stream << "public:\n";
+  this->PrintIndent();
+  this->stream << "sc_in< bool > clk;\n";
+  this->PrintIndent();
+  this->stream << "sc_in< bool > rst;\n";
+
+  Array<VarExpr> input_args;
+  for (auto& v : f->args) {
+      input_args.push_back(v);
+  }
+  InputDirectionCollector idc(input_args);
+  auto is_arg_written = idc.Analyze(f->body);
+  
+  vector<string> vid_array;
+  for (size_t i = 0; i < f->args.size(); ++i) {
+    Var v = f->args[i];
+    string vid = AllocVarID(v.get());
+    if (is_arg_written[vid]) {
+      this->stream << "cynw_p2p < ";
+      PrintType(v.type(), this->stream);
+      this->stream << " >::out " << vid << ";\n";
+    }
+    else {
+      this->stream << "cynw_p2p < ";
+      PrintType(v.type(), this->stream);
+      this->stream << " >::in " << vid << ";\n";
+    }
+    vid_array.push_back(vid);
+  }
+
+  this->stream << "\nSC_CTOR( " << f->name << " )\n";
+  this->stream << ": clk( \"clk\" )\n, rst( \"rst\" )\n";
+  for (size_t i = 0; i < f->args.size(); ++i) {
+    Var v = f->args[i];
+    string vid = vid_array.at(i);
+    this->stream << ", " << vid << "( \"" << vid << "\" )\n";
+  }
+  this->stream << "{\n";
+  int func_scope = this->BeginScope();
+  range_ = CollectIterRange(f->body);
+  this->PrintStmt(f->body);
+  this->EndScope(func_scope);
+  this->PrintIndent();
+  this->stream << "}\n\n";
+
+  // close soda header handle
+  if (soda_header_.is_open())
+    soda_header_.close();
+}
+
+void CodeGenSystemC::PrintType(Type t, std::ostream& os) {
   int lanes = t.lanes();
   if (t.is_uint()) {
     os << "sc_uint <";
@@ -368,112 +1756,70 @@ void CodeGenSystemC::PrintType(Type t, std::ostream& os) {  // NOLINT(*)
     os << t.bits();
     os << ">";
   }
+  else if (t.is_handle()) {
+    os << "sc_uint <";
+    os << t.bits();
+    os << ">";
+  }
   else
-    LOG(ERROR) << "Unsupported Data Type " << t << "!" ;
+    LOG(WARNING) << "Unsupported Data Type " << t << "!" ;
   if (lanes > 1)
-    LOG(ERROR) << "SystemC does not support array interface" ;
+    LOG(WARNING) << "SystemC does not support array interface" ;
   return;
-  
-  // if (t.is_handle()) {
-  //   //LOG(FATAL) << "The buffer shouldn't call PrintType for printing type";
-  //   os << "void*";
-  //   return ;
-  // }
-  // bool fail = false;
-  // if (t.is_float()) {
-  //   switch (t.bits()) {
-  //     case 16: os << "half"; break;
-  //     case 32: os << "float"; break;
-  //     case 64: os << "double"; break;
-  //     case 128: os << "double double"; break;
-  //     default: fail = true; break;
-  //   }
-  //   if (!fail && lanes == 1) return;
-  //   if (!fail && (lanes >= 2 && lanes <= 16)) {
-  //     os << lanes; return;
-  //   }
-  // } else if (t.is_uint() || t.is_int()) {
+  // if (t.is_uint() || t.is_int() || t.is_fixed() || t.is_ufixed()) {
   //   if (t.is_uint()) {
-  //     os << "unsigned ";
+  //     os << "ap_uint<" << t.bits() << ">";
+  //   } else if (t.is_int()) {
+  //     os << "ap_int<" << t.bits() << ">";
+  //   } else if (t.is_ufixed()) {
+  //     os << "ap_ufixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+  //   } else {
+  //     os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
   //   }
-  //   if (t.bits() == 8 && t.lanes() == 4) {
-  //     // directly 4 8 bit int in integer.
-  //     os << "int"; return;
-  //   }
-
-  //   int target_bit = 1;
-  //   while (target_bit < t.bits())
-  //     target_bit <<= 1;
-
-  //   switch (target_bit) {
-  //     case 1: os << "int"; break;
-  //     case 2: os << "char"; break;
-  //     case 4: os << "char"; break;
-  //     case 8: os << "char"; break;
-  //     case 16: os << "short"; break;
-  //     case 32: os << "int"; break;
-  //     case 64: os << "long"; break;
-  //     case 128: os << "long"; break; // FIXME: Should use long long
-  //     default: fail = true; break;
-  //   }
-  //   if (!fail && lanes == 1) return;
-  //   // FIXME: Not yet support multiple lanes
-  //   //if (!fail && (lanes >= 2 && lanes <= 16)) {
-  //   //  os << lanes; return;
-  //   //}
+  // } else {
+  //   CodeGenC::PrintType(t, os);
   // }
-  // os << t;
-  // LOG(WARNING) << "Cannot convert type " << t ;
-  return ;
 }
 
-void CodeGenSystemC::PrintVecAddr(const Variable* buffer, Type t,
-                                 Expr base, std::ostream& os) {  // NOLINT(*)
-  // FIXME: What's this node for?
-  if (!HandleTypeMatch(buffer, t.element_of())) {
-    os << '(';
-    auto it = alloc_storage_scope_.find(buffer);
-    if (it != alloc_storage_scope_.end()) {
-      PrintStorageScope(it->second, os);
-    }
-    os << ' ';
-    PrintType(t.element_of(), os);
-    os << "*)";
-  }
-  os << GetVarID(buffer) << " + ";
-  PrintExpr(base, os);
-  return ;
+void CodeGenSystemC::VisitExpr_(const Min *op, std::ostream& os) {  // NOLINT(*)
+  os << "hls::min(";
+  PrintExpr(op->a, os);
+  os << ", ";
+  PrintExpr(op->b, os);
+  os << ")";
 }
 
-void CodeGenSystemC::PrintVecStore(const Variable* buffer,
-                                  Type t, Expr base,
-                                  const std::string& value) {
-  // FIXME: What's this node for?
-  this->PrintIndent();
-  stream << "vstore" << t.lanes() << "(" << value << ", 0, ";
-  PrintVecAddr(buffer, t, base, stream);
-  stream << ");\n";
-  return ;
+void CodeGenSystemC::VisitExpr_(const Max *op, std::ostream& os) {  // NOLINT(*)
+  os << "hls::max(";
+  PrintExpr(op->a, os);
+  os << ", ";
+  PrintExpr(op->b, os);
+  os << ")";
 }
 
-void CodeGenSystemC::PrintStorageSync(const Call* op) {
-  const std::string& sync = op->args[0].as<StringImm>()->value;
-  if (sync == "warp") {
-    LOG(FATAL) << "warp sync not supported in Merlin";
-  } else if (sync == "shared") {
-    LOG(FATAL) << "shared sync not supported in Merlin";
-  } else if (sync == "global") {
-    LOG(FATAL) << "global sync not supported in Merlin";
-  }
-  return ;
+void CodeGenSystemC::VisitExpr_(const GetBit* op, std::ostream& os) {
+  PrintExpr(op->a, os);
+  os << "[";
+  PrintExpr(op->index, os);
+  os << "]";
+}
+
+void CodeGenSystemC::VisitExpr_(const GetSlice* op, std::ostream& os) {
+  PrintExpr(op->a, os);
+  os << "(";
+  Expr new_index_left = ir::Simplify(op->index_left - 1);
+  PrintExpr(new_index_left, os);
+  os << ", ";
+  PrintExpr(op->index_right, os);
+  os << ")";
 }
 
 void CodeGenSystemC::VisitExpr_(const Load* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
   // TODO: find a betetr way to track streaming channels 
-  if (top_args.find(vid) != top_args.end()) {
-    PrintIndent(); 
-    stream << vid << "_temp = " << vid << ".read_nb();\n";
+  if (stream_vars.find(vid) != stream_vars.end()) {
+    PrintIndent();  
+    stream << vid << "_temp = " << vid << ".read();\n";
     os << vid << "_temp.get_data()";
   } else {
     CodeGenC::VisitExpr_(op, os);
@@ -482,13 +1828,12 @@ void CodeGenSystemC::VisitExpr_(const Load* op, std::ostream& os) {
 
 void CodeGenSystemC::VisitStmt_(const Store* op) {
   std::string vid = GetVarID(op->buffer_var.get());
-  if (top_args.find(vid) != top_args.end()) {
-    auto value = PrintExpr(op->value);
-    auto bits = handle_data_type_[op->buffer_var.get()].bits();
+  if (stream_vars.find(vid) != stream_vars.end()) {
     PrintIndent(); 
+    auto bits = handle_data_type_[op->buffer_var.get()].bits();
     stream << "pkt_b" << bits << " " << vid <<  "_temp;\n";
     PrintIndent(); 
-    stream << vid <<  "_temp.set_data(" << value << ");\n";
+    stream << vid <<  "_temp.set_data(" << PrintExpr(op->value) << ");\n";
     PrintIndent(); 
     stream << vid <<  "_temp.set_keep(-1);\n";
     PrintIndent(); 
@@ -533,88 +1878,147 @@ void CodeGenSystemC::VisitStmt_(const Store* op) {
   }
 }
 
-void CodeGenSystemC::PrintStorageScope(
-    const std::string& scope, std::ostream& os) { // NOLINT(*)
-    return ;
-}
-
-void CodeGenSystemC::VisitExpr_(const Broadcast* op, std::ostream& os) { // NOLINT(*)
-  std::string v = PrintExpr(op->value);
-  os << "((";
-  PrintType(op->type, os);
-  os << ")(";
-  for (int i = 0; i < op->lanes; ++i) {
-    if (i != 0) os << ", ";
-    os << v;
-  }
-  os << "))";
-  return ;
-}
-
-void CodeGenSystemC::VisitStmt_(const LetStmt* op) {
-  std::string value = PrintExpr(op->value);
-  // Skip the argument retrieving assign statement
-  std::string vid = AllocVarID(op->var.get());
-  if (op->var.type() != Handle() &&
-      value.find("TVMArray") == std::string::npos &&
-      value.find("arg") != 0) {
-    PrintIndent();
-    PrintType(op->var.type(), this->stream);
-    this->stream << ' '
-                 << vid
-                 << " = " << value << ";\n";
-  }
-  PrintStmt(op->body);
-}
-
-void CodeGenSystemC::GenForStmt(const For* op, std::string pragma, bool before) {
-  std::string extent = PrintExpr(op->extent);
-  std::string vid = AllocVarID(op->loop_var.get());
-  CHECK(is_zero(op->min));
-  if (before && pragma.length() > 0) {
-    PrintIndent();
-    stream << pragma;
-  }
-  PrintIndent();
-
-  // print loop labels
-  bool loop_stage_name = false;
-  for (unsigned int i = 0; i < op->annotate_keys.size(); i++) {
-    if (auto str = op->annotate_keys[i].as<StringImm>()) {
-      if (str->value == "stage_name") {
-        loop_stage_name = true;
-        auto label = op->annotate_values[i].as<StringImm>();
-        std::string output_label;
-        if (label->value == "") {
-          output_label = vid;
-        } else {
-          output_label = label->value + "_" + vid;
-        }
-        for (size_t i = 0; i < output_label.size(); ++i) {
-          if (output_label[i] == '.') output_label[i] = '_';
-        }
-        stream << output_label << ": ";
-        break;
+void CodeGenSystemC::VisitExpr_(const Call *op, std::ostream& os) {  // NOLINT(*)
+  if ((op->call_type == Call::Extern ||
+      op->call_type == Call::PureExtern) || op->name == "sqrt") {
+    os << "sqrt(";
+    for (size_t i = 0; i < op->args.size(); i++) {
+      this->PrintExpr(op->args[i], os);
+      if (i < op->args.size() - 1) {
+        os << ", ";
       }
     }
+    os << ")";
+  } else {
+    CodeGenC::VisitExpr_(op, os);
   }
-  if (!loop_stage_name)
-    stream << vid << ": ";
+}
 
-  stream << "for (";
-  PrintType(op->loop_var.type(), stream);
-  stream << ' ' << vid << " = 0; "
-            << vid << " < " << extent
-            << "; ++" << vid << ") {\n";
-  if (!before && pragma.length() > 0) {
-    PrintIndent();
-    stream << pragma;
+void CodeGenSystemC::VisitStmt_(const Allocate* op) {
+  CHECK(!is_zero(op->condition));
+  std::string vid = AllocVarID(op->buffer_var.get());
+
+
+  if (op->new_expr.defined()) {
+    CHECK_EQ(op->free_function, "nop");
+    std::string new_data = PrintExpr(op->new_expr);
+    this->PrintIndent();
+    PrintType(op->type, stream);
+    stream << "* "<< vid << '=' << new_data << ";\n";
+  } else {
+    int32_t constant_size = op->constant_allocation_size();
+    CHECK_GT(constant_size, 0)
+        << "Can only handle constant size stack allocation for now";
+    const Variable* buffer = op->buffer_var.as<Variable>();
+    var_shape_map_[buffer] = op->extents;
+
+    std::string scope; // Allocate on local scope by default
+    auto it = alloc_storage_scope_.find(buffer);
+    if (it != alloc_storage_scope_.end())
+      scope = alloc_storage_scope_.at(buffer);
+    else scope = "local";
+
+    // FIFO Checking 
+    bool is_fifo = false;
+    for (auto attr : op->attrs) {
+      if (attr.as<StreamStmt>()) {
+        is_fifo = true;
+      }
+    }
+    // Auto-apply dataflow
+    if (is_fifo) {
+      if (stream.str().find("#pragma HLS dataflow") == std::string::npos) {
+        LOG(INFO) << "Auto-applying dataflow optimization...";
+        PrintIndent();
+        stream << "#pragma HLS dataflow\n";
+      }
+    }
+
+    this->PrintIndent();
+    // Skip partitioned stage
+    if (vid.find("_partitioned") == std::string::npos) {
+      if (constant_size > 1) { // Transfer length one array to scalar
+        if (sdsoc_mode) {
+          // Allocate continuous physical mem
+          PrintType(op->type, stream);
+          stream << "* " << vid << " = (";
+          PrintType(op->type, stream);
+          stream << " *)sds_alloc(sizeof(";
+          PrintType(op->type, stream);
+          stream << ")";
+
+          for (auto& v : op->extents) {
+            stream << "*" << v;
+          }
+          stream << ")";
+        } else {
+          if (is_fifo) {
+            stream << "hls::stream<";
+            PrintType(op->type, stream);
+            stream << " > " << vid;
+
+            // Not FIFO channels
+          } else {
+            if (vid.find("_reuse") != std::string::npos) {
+              PrintType(op->type, stream);
+              stream << ' '<< vid;
+              for (size_t i = 0; i < op->extents.size(); i++) {
+                stream << '[';
+                PrintExpr(op->extents[i], stream);
+                stream << "]";
+              }
+            } else {
+              if (sdsoc_mode) {
+                // allocate continuous phy mem
+                PrintType(op->type, stream);
+                stream << "* " << vid << " = (";
+                PrintType(op->type, stream);
+                stream << " *)sds_alloc(sizeof(";
+                PrintType(op->type, stream);
+                stream << ")";
+
+                for (auto& v : op->extents) {
+                  stream << "*" << v;
+                }
+                stream << ")";
+              } else {
+                PrintType(op->type, stream);
+                stream << ' '<< vid;
+                // stream << '[' << constant_size << "]";
+                for (size_t i = 0; i < op->extents.size(); i++) {
+                  stream << '[';
+                  PrintExpr(op->extents[i], stream);
+                  stream << "]";
+                }
+                if (!op->init_values.empty()) {
+                  stream << " = ";
+                  if (constant_size == 1) PrintExpr(op->init_values[0], stream);
+                  else {
+                    std::vector<size_t> extents;
+                    for (size_t i = 0; i < op->extents.size(); i++) {
+                      const int64_t* extent = as_const_int(op->extents[i]);
+                      CHECK(extent != nullptr) << "Extent of an init array cannot be a variable\n";
+                      extents.push_back(*extent);
+                    }
+                    PrintArray(op->init_values, extents, stream, 0, 0);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else {
+        PrintType(op->type, stream);
+        stream << ' ' << vid;
+      }
+    }
+    stream << ";\n";
+    for (size_t i = 0; i < op->attrs.size(); i++) 
+      this->PrintStmt(op->attrs[i]);
+    buf_length_map_[buffer] = constant_size;
   }
-  int for_scope = BeginScope();
-  PrintStmt(op->body);
-  this->EndScope(for_scope);
-  PrintIndent();
-  stream << "}\n";
+  RegisterHandleType(op->buffer_var.get(), op->type);
+  this->PrintStmt(op->body);
 }
 
 void CodeGenSystemC::VisitStmt_(const For* op) {
@@ -623,19 +2027,6 @@ void CodeGenSystemC::VisitStmt_(const For* op) {
   Stmt stmt = op->body;
   while (const For* for_op = stmt.as<For>())
     stmt = for_op->body;
-
-  // Skip for-loops for all 0 assignment 
-  if (auto st = stmt.as<Store>()) {
-    auto value = st->value;
-    if (auto c = value.as<Cast>()) value = c->value;
-    if (auto v = value.as<IntImm>()) {
-      if (v->value == 0) return;
-    } else if (auto v = value.as<FloatImm>()) {
-      if (v->value == 0) return;
-    } else if (auto v = value.as<UIntImm>()) {
-      if (v->value == 0) return;
-    }
-  }
 
   if (op->for_type == ForType::Unrolled) {
     int unroll_factor = 0, i = 0;
@@ -674,32 +2065,392 @@ void CodeGenSystemC::VisitStmt_(const For* op) {
   GenForStmt(op, os.str(), false);
 }
 
-void CodeGenSystemC::VisitStmt_(const IfThenElse* op) {
-  std::string cond = PrintExpr(op->condition);
-
-  // Skip the buffer data checking
-  if (std::regex_match(cond, std::regex("!\\((arg)(.+)(== NULL)\\)")))
-      return ;
-
+void CodeGenSystemC::VisitStmt_(const Partition* op) {
   PrintIndent();
-  if (cond[0] == '(' && cond[cond.length() - 1] == ')') {
-    stream << "if " << cond << " {\n";
-  } else {
-    stream << "if (" << cond << ") {\n";
+  stream << "#pragma HLS array_partition variable=";
+  std::string vid = GetVarID(op->buffer_var.get());
+  stream << vid << " ";
+  switch (op->partition_type) {
+    case PartitionType::Complete:
+      stream << "complete";
+      break;
+    case PartitionType::Block:
+      stream << "block";
+      break;
+    case PartitionType::Cyclic:
+      stream << "cyclic";
+      break;
   }
-  int then_scope = BeginScope();
-  PrintStmt(op->then_case);
-  this->EndScope(then_scope);
-
-  if (op->else_case.defined()) {
-    PrintIndent();
-    stream << "} else {\n";
-    int else_scope = BeginScope();
-    PrintStmt(op->else_case);
-    this->EndScope(else_scope);
+  stream << " dim=" << op->dim;
+  if (op->partition_type != PartitionType::Complete) {
+    stream << " factor=" << op->factor;
   }
-  PrintIndent();
-  stream << "}\n";
+  stream << "\n";
 }
+
+void CodeGenSystemC::VisitExpr_(const StreamExpr* op, std::ostream& os) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  os << vid << ".read()";
+}
+
+void CodeGenSystemC::VisitStmt_(const ExternModule* op) {
+  PrintIndent();
+  if (const auto* f = runtime::Registry::Get("process_extern_module")) {
+    std::string code;
+    code = (*f)(op->annotate_keys, op->annotate_values).operator std::string();
+    HCL_DEBUG_LEVEL(2) << code;
+    stream << code;
+  }
+}
+
+void CodeGenSystemC::VisitStmt_(const StreamStmt* op) {
+  std::string vid = GetVarID(op->buffer_var.get());
+  PrintIndent();
+  if (op->stream_type == StreamType::ATTR) {
+    stream << "#pragma HLS stream variable=" << vid << " depth=" << op->depth << "\n";
+  } else {
+    stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
+  }
+}
+
+class AllocateCollector final : public IRVisitor {
+  public:
+    AllocateCollector(std::vector<const Allocate*>& alloc_list,
+                      VarExprUnorderedSet& outputs)
+      : alloc_list_(alloc_list), outputs_(outputs) {}
+
+    void Visit_(const Allocate* op) {
+      if (outputs_.count(op->buffer_var))
+        alloc_list_.push_back(op);
+      this->Visit(op->body);
+    }
+
+  private:
+    std::vector<const Allocate*>& alloc_list_;
+    VarExprUnorderedSet& outputs_;
+};
+
+void CodeGenSystemC::VisitStmt_(const KernelStmt *op) {
+  PrintIndent();
+
+  stream << op->name << "(";
+
+  // Extract annotation values
+  std::vector<argInfo> args_info;
+  for (size_t k = 0; k < op->annotate_keys.size(); k++) {
+    auto key = op->annotate_values[k].as<StringImm>(); CHECK(key);
+  }
+  // Print kernel function arguments
+  for (size_t i = 0; i < op->args.size(); i++) {
+    std::string arg_name = PrintExpr(op->args[i]);
+    stream << arg_name;
+    if (i < op->args.size() - 1) stream << ", ";
+  }
+  stream << ");\n";
+}
+
+void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
+  LoweredFunc f;
+  // save func states
+  CodeGenC::SaveFuncState(f);
+  CodeGenC::InitFuncState(f);
+  std::ostringstream save;
+  std::ostringstream pragma;
+  save << this->stream.str();
+  this->stream.str("");
+  this->stream.clear();
+
+  // skip the first underscore
+  GetUniqueName("_");
+  // add to alloc buffer : type.
+  for (const auto & k : op->args) {
+    RegisterHandleType(k.get(), k.get()->type);
+  }
+
+  // collect argument information
+  std::vector<argInfo> args_info;
+  bool is_kernel_func = false;
+  for (size_t i = 0; i < op->attributes.size(); i++) {
+    auto info = op->attributes[i];
+    CHECK(info.size() >=2);
+    auto arg_name = info[0].as<StringImm>()->value;
+    for (size_t i = 0; i < arg_name.size(); ++i) {
+      if (arg_name[i] == '.') arg_name[i] = '_';
+    }
+
+    if (info.size() > 2) { 
+        is_kernel_func = true;
+        CHECK(info.size() == 6);
+        auto mem_dev = static_cast<StorageType>(info[1].as<IntImm>()->value);
+        int mem_port = info[2].as<IntImm>()->value;
+        auto stream_type = static_cast<StreamType>(info[3].as<IntImm>()->value);
+        int channel_depth = info[4].as<IntImm>()->value;
+        bool is_written = info[5].as<IntImm>()->value == 1 ? true : false;
+        argInfo arg_info = {arg_name, mem_dev, mem_port, stream_type, channel_depth, is_written};
+        args_info.push_back(arg_info);
+
+    } else {
+        bool is_written = info[1].as<IntImm>()->value == 1 ? true : false;
+        argInfo arg_info;
+        arg_info.is_written = is_written;
+        args_info.push_back(arg_info);
+    }
+  }
+
+  // print top-level kernel function
+  if (is_kernel_func) {
+    stream << "test1\n";
+    // int extern_scope = -1;
+    // if (extern_mode) {
+    //   extern_scope  = BeginScope();
+    //   stream << "extern \"C\" {\n";
+    // }
+
+    stream << "void " << op->name << "(";
+    // for (size_t i = 0; i < op->args.size(); ++i) {
+    //   VarExpr v = op->args[i];
+    //   var_shape_map_[v.get()] = op->arg_shapes[i];
+    //   std::string vid = AllocVarID(v.get());
+
+    //   if (i != 0) stream << ", ";
+    //   std::string str = PrintExpr(op->arg_types[i]);
+    //   Type type = String2Type(str);
+
+    //   // pass-by-value arguments
+    //   if (var_shape_map_[v.get()].size() == 1 &&
+    //       var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
+    //     PrintType(type, stream);
+    //     this->stream << " " << vid;
+
+    //   // pass-by-pointer arguments
+    //   } else {
+    //     CHECK(args_info.size() > i) << i << ":" << args_info.size();
+    //     auto info = args_info[i];
+
+    //     if (info.stream_type == StreamType::FIFO) {
+    //       auto bits = type.bits();
+    //       if (decl_stream.str().find("typedef qdma_axis<" + 
+    //               std::to_string(bits)) == std::string::npos) {
+    //         decl_stream << "typedef qdma_axis<" << bits 
+    //                     << ", 0, 0, 0> pkt_b" << bits << ";\n";
+    //       }
+    //       stream << "hls::stream<pkt_b" << bits << "> &" << vid;
+
+    //     // Memory-mapped pointers
+    //     } else {
+    //       PrintType(type, stream);
+    //       auto size = var_shape_map_[v.get()];
+    //       stream << " " << vid;
+    //       for (auto& s : size) {
+    //         stream << "[" << s << "]";
+    //       }
+    //     }
+    //   }
+    // }
+    // stream << ") {\n";
+
+    if (extern_mode) {
+    //   // Port-level protocol interface
+    //   CHECK(op->args.size() == op->args.size());
+    //   for (size_t i = 0; i < op->args.size(); i++) {
+    //     if (op->arg_shapes[i].size() == 1 &&
+    //         op->arg_shapes[i][0].as<IntImm>()->value == 1) {
+    //       continue;
+    //     } else {
+    //       PrintIndent();
+    //       auto info = args_info[i];
+
+    //       if (info.stream_type == StreamType::FIFO) {
+    //         stream << "#pragma HLS INTERFACE axis port="
+    //                << info.name << "\n";
+    //       } else {
+    //         stream << "#pragma HLS INTERFACE m_axi port="
+    //                << info.name << " "
+    //                << "offset=slave bundle=gmem" << info.mem_port << "\n";
+    //       }
+    //     }
+    //   }
+
+    //   // Block-level control interface 
+    //   for (size_t i = 0; i < op->args.size(); i++) {
+    //     auto info = args_info[i];
+    //     if (info.stream_type == StreamType::FIFO) continue;
+    //     PrintIndent();
+    //     stream << "#pragma HLS INTERFACE s_axilite port="
+    //            << info.name << " "
+    //            << "bundle=control\n";
+    //   }
+    //   PrintIndent();
+    //   stream << "#pragma HLS INTERFACE s_axilite"
+    //          << " port=return bundle=control\n";
+    }
+
+    // // function body
+    // int func_scope = BeginScope();
+    // range_ = CollectIterRange(op->body);
+    // PrintStmt(op->body);
+
+    // EndScope(func_scope);
+    // PrintIndent();
+    // stream << "}\n";
+
+    // if (extern_mode) {
+    //     stream << "}\n\n";
+    //     EndScope(extern_scope);
+    // }
+
+  // Non-top kernel function 
+  } else {
+    stream << "test2\n";
+    // auto const_size = [&](Array<Expr> shape) -> int32_t {
+    //   int32_t res = 1;
+    //   for (auto s : shape) {
+    //       CHECK(s.as<IntImm>());
+    //       auto v = s.as<IntImm>()->value;
+    //       res = res * v;
+    //   }
+    //   return res;
+    // };
+    // std::ostringstream func_os;
+    // func_os << "static void " << op->name << "(";
+    // for (size_t i = 0; i < op->args.size(); ++i) {
+    //   VarExpr v = op->args[i];
+    //   var_shape_map_[v.get()] = op->arg_shapes[i];
+
+    //   int32_t constant_size = const_size(op->arg_shapes[i]);
+    //   CHECK_GT(constant_size, 0)
+    //       << "Input arg size must be greater than 0...";
+    //   buf_length_map_[v.get()] = constant_size;
+    //   std::string vid = AllocVarID(v.get());
+    //   if (i != 0) func_os << ", ";
+    //   std::string str = PrintExpr(op->arg_types[i]);
+    //   Type type = String2Type(str);
+
+    //   // Scalar input
+    //   CHECK_GT(op->arg_shapes[i].size(), 0);
+    //   if (op->arg_shapes[i].size() == 1) {
+    //     auto dim = op->arg_shapes[i][0].as<IntImm>();
+    //     CHECK(dim);
+    //     if (dim->value == 1 || dim->value == 0) {
+    //         PrintType(type, func_os);
+    //         auto info = args_info[i];
+    //         if (info.is_written) func_os << "&";
+    //         func_os << " " << vid;
+    //         continue;
+    //     }
+    //   }
+
+    //   if (op->arg_shapes[i].size() > 0) {
+    //     auto shape = op->arg_shapes[i]; 
+    //     PrintType(type, func_os);
+    //     func_os << " " << vid;
+    //     func_os << "[";
+    //     for (size_t k = 0; k < shape.size(); k++) {
+    //       if (k != shape.size() - 1) func_os << "][";
+    //       func_os << shape[k];
+    //     }
+    //     func_os << "]";
+    //   }
+    // }
+    // decl_stream << func_os.str() << ");\n";
+    // stream << func_os.str() << ") {\n";
+    
+    // PrintIndent();
+    // stream << "#pragma HLS inline off\n";
+
+    // // function body
+    // int func_scope = BeginScope();
+    // range_ = CollectIterRange(op->body);
+    // PrintStmt(op->body);
+    // EndScope(func_scope);
+    // PrintIndent();
+    // stream << "}\n\n";
+
+  }
+
+  // restore default stream
+  module_stream << this->stream.str();
+  this->stream.str("");
+  this->stream.clear();
+  this->stream << save.str();
+  RestoreFuncState(f);
+}
+
+void CodeGenSystemC::VisitStmt_(const Stencil* op) {
+  // Use SODA codegen for stencil analysis
+  CodeGenSODA cg_soda;
+  cg_soda.Init(false);
+  VarExprUnorderedSet inputs;
+  VarExprUnorderedSet outputs;
+  for (size_t i = 0; i < op->inputs.size(); i++)
+    inputs.insert(op->inputs[i]);
+  for (size_t i = 0; i < op->outputs.size(); i++) {
+    outputs.insert(op->outputs[i]);
+  }
+  std::vector<const Allocate*> alloc_list;
+  AllocateCollector collector(alloc_list, outputs);
+  collector.Visit(op->body);
+  std::string kernel_name;
+  cg_soda.PrintSODA(op, &kernel_name);
+  std::string code = cg_soda.Finish();
+
+  // Generate SODA HLSC code
+  SODA2HLSC(code);
+
+  PrintIndent();
+  // Create a new file for the stencil function if not exists
+  if (!soda_header_.is_open()) {
+    soda_header_.open("soda_stencil.h");
+    stream << "#include \"soda_stencil.h\"\n";
+  }
+  // Allocate output tensors if needed
+  for (size_t i = 0; i < alloc_list.size(); i++) {
+    auto alloc = alloc_list[i];
+    PrintIndent();
+    PrintType(alloc->type, stream);
+    std::string vid = AllocVarID(alloc->buffer_var.get());
+    stream << ' ' << vid;
+    const Variable* buffer = alloc->buffer_var.as<Variable>();
+    var_shape_map_[buffer] = alloc->extents;
+    for (size_t j = 0; j < alloc->extents.size(); j++) {
+      stream << '[';
+      PrintExpr(alloc->extents[j], stream);
+      stream << ']';
+    }
+    stream << ";\n";
+  }
+  // Print the function call to SODA function
+  PrintIndent();
+  soda_header_ << "void " + kernel_name + "(";
+  stream << kernel_name + "(";
+  for (size_t i = 0; i < op->inputs.size(); i++) {
+    PrintType(cg_soda.var_type_map_[op->inputs[i].get()], soda_header_);
+    soda_header_ << "* ";
+    PrintExpr(op->inputs[i], soda_header_);
+    PrintExpr(op->inputs[i], stream);
+    soda_header_ << ", ";
+    stream << ", ";
+  }
+  for (size_t i = 0; i < op->outputs.size(); i++) {
+    PrintType(cg_soda.var_type_map_[op->outputs[i].get()], soda_header_);
+    soda_header_ << "* ";
+    PrintExpr(op->outputs[i], soda_header_);
+    PrintExpr(op->outputs[i], stream);
+    if (i < op->outputs.size()-1) {
+      soda_header_ << ", ";
+      stream << ", ";
+    }
+  }
+  soda_header_ << ");\n";
+  stream << ");\n";
+
+  // Generate SODA HLSC code
+  std::ofstream soda_file;
+  soda_file.open(kernel_name+".cpp");
+  soda_file << "#include \"soda_stencil.h\"\n";
+  soda_file << code;
+  soda_file.close();
+}
+
 }  // namespace codegen
 }  // namespace TVM
