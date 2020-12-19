@@ -34,97 +34,87 @@ struct argInfo {
 void CodeGenCatapultC::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
   // write header files
-  this->decl_stream << "#include <ap_int.h>\n";
-  this->decl_stream << "#include <ap_fixed.h>\n";
-  this->decl_stream << "#include <ap_axi_sdata.h>\n";
-  this->decl_stream << "#include <hls_stream.h>\n";
-  this->decl_stream << "#include <hls_math.h>\n";
-  this->decl_stream << "#include <math.h>\n";
-  this->decl_stream << "#include <stdint.h>\n";
-
-  // setup codegen mode
-  if (map_arg_type.count("sdsoc")) {
-    sdsoc_mode = true;
-    this->decl_stream << "#include \"sds_lib.h\"\n\n";
-  } else if (map_arg_type.count("sdaccel")) {
-    extern_mode = true;
-    this->decl_stream << "\n";
-  }
+  this->decl_stream << "#include <ac_int.h>\n";
+  this->decl_stream << "#include <ac_channel.h>\n";
+  this->decl_stream << "#include <mc_scverify.h>\n\n";
 
   // clear previous generated state.
   this->InitFuncState(f);
-  map_arg_type_ = map_arg_type;
+  // map_arg_type_ = map_arg_type;
   // add to alloc buffer type.
   for (const auto & kv : f->handle_data_type) {
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
 
-  HCL_DEBUG_LEVEL(2) << "Adding VHLS function...";
+  // [Below is function wrapper generation]
+  HCL_DEBUG_LEVEL(2) << "Adding CatapultC function...";
   // generate top function signature
-  this->stream << "void " << f->name << "(";
+  // this->stream << "void " << f->name << "(";
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
-    std::string vid = AllocVarID(v.get());
-    if (i != 0) stream << ", ";
+    std::string vid = AllocVarID(v.get()); // allocate a single static form?
+    // if (i != 0) stream << ", ";
     // check type in the arg map
     if (map_arg_type.find(vid) == map_arg_type.end()) {
       LOG(WARNING) << vid << " type not found\n";
-      PrintType(v.type(), this->stream);
-      this->stream << ' ' << vid;
+      // PrintType(v.type(), this->stream);
+      // this->stream << ' ' << vid;
     } else {
       auto arg = map_arg_type[vid];
-      PrintType(std::get<1>(arg), this->stream);
+      // PrintType(std::get<1>(arg), this->stream);
       // this->stream << "* " << std::get<0>(arg);
       const BufferNode* buf = f->api_args[i].as<BufferNode>();
       if (v.type().is_handle() && buf) {
         var_shape_map_[buf->data.get()] = buf->shape;
-        auto it = alloc_storage_scope_.find(v.get());
-        if (it != alloc_storage_scope_.end()) {
-          PrintStorageScope(it->second, stream);
-        }
-        this->stream << " " << std::get<0>(arg);
+        // auto it = alloc_storage_scope_.find(v.get());
+        // if (it != alloc_storage_scope_.end()) {
+        //   PrintStorageScope(it->second, stream);
+        // }
+        // this->stream << " " << std::get<0>(arg);
 
         // print multi-dim array
-        this->stream << "[";
-        int count = 0;
-        for (auto& s : buf->shape) {
-          if (count != 0) this->stream << "][";
-          this->stream << s;
-          count = count + 1;
-        }
-        this->stream << "]";
-      } else {
-        this->stream << " " << std::get<0>(arg);
-      }
+        // this->stream << "[";
+        // int count = 0;
+        // for (auto& s : buf->shape) {
+        //   if (count != 0) this->stream << "][";
+        //   this->stream << s;
+        //   count = count + 1;
+        // }
+        // this->stream << "]";
+      } // else {
+      //   // this->stream << " " << std::get<0>(arg);
+      // }
     }
   }
 
-  stream << ") {\n";
+  // stream << ") {\n";
   int func_scope = this->BeginScope();
   range_ = CollectIterRange(f->body);
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
-  this->stream << "}\n\n";
+  // this->stream << "}\n\n";
 
   // close soda header handle
-  if (soda_header_.is_open())
-    soda_header_.close();
+  // if (soda_header_.is_open())
+  //   soda_header_.close();
 }
 
 void CodeGenCatapultC::PrintType(Type t, std::ostream& os) {
   if (t.is_uint() || t.is_int() || t.is_fixed() || t.is_ufixed()) {
     if (t.is_uint()) {
-      os << "ap_uint<" << t.bits() << ">";
+      os << "ac_int<" << t.bits() << ", false>";
     } else if (t.is_int()) {
-      os << "ap_int<" << t.bits() << ">";
+      os << "ac_int<" << t.bits() << ", true>";
     } else if (t.is_ufixed()) {
-      os << "ap_ufixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
-    } else {
-      os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+      LOG(WARNING) << "Unsupported Data Type " << t << "!" ;
+    //   os << "ac_ufixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+    // } else {
+    //   os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
     }
   } else {
-    CodeGenC::PrintType(t, os);
+    LOG(WARNING) << "Unsupported Data Type " << t << "!" ;
+    // CodeGenC::PrintType(t, os);
   }
 }
 
@@ -162,6 +152,8 @@ void CodeGenCatapultC::VisitExpr_(const GetSlice* op, std::ostream& os) {
 }
 
 void CodeGenCatapultC::VisitExpr_(const Load* op, std::ostream& os) {
+  LOG(INFO) << "Load\n";
+  os << "entered Load \n";
   std::string vid = GetVarID(op->buffer_var.get());
   // TODO: find a betetr way to track streaming channels 
   if (stream_vars.find(vid) != stream_vars.end()) {
@@ -174,7 +166,10 @@ void CodeGenCatapultC::VisitExpr_(const Load* op, std::ostream& os) {
 }
 
 void CodeGenCatapultC::VisitStmt_(const Store* op) {
+  LOG(INFO) << "Store\n";
+  stream << "entered Store \n";
   std::string vid = GetVarID(op->buffer_var.get());
+  stream << vid << ".write(" << vid << "_temp);\n";
   if (stream_vars.find(vid) != stream_vars.end()) {
     PrintIndent(); 
     auto bits = handle_data_type_[op->buffer_var.get()].bits();
@@ -225,7 +220,7 @@ void CodeGenCatapultC::VisitStmt_(const Store* op) {
   }
 }
 
-void CodeGenCatapultC::VisitExpr_(const Call *op, std::ostream& os) {  // NOLINT(*)
+void CodeGenCatapultC::VisitExpr_(const Call *op, std::ostream& os) {  // NOLINT(*)  
   if ((op->call_type == Call::Extern ||
       op->call_type == Call::PureExtern) || op->name == "sqrt") {
     os << "sqrt(";
@@ -248,10 +243,10 @@ void CodeGenCatapultC::VisitStmt_(const Allocate* op) {
 
   if (op->new_expr.defined()) {
     CHECK_EQ(op->free_function, "nop");
-    std::string new_data = PrintExpr(op->new_expr);
-    this->PrintIndent();
-    PrintType(op->type, stream);
-    stream << "* "<< vid << '=' << new_data << ";\n";
+    // std::string new_data = PrintExpr(op->new_expr);
+    // this->PrintIndent();
+    // PrintType(op->type, stream);
+    // stream << "* "<< vid << '=' << new_data << ";\n";
   } else {
     int32_t constant_size = op->constant_allocation_size();
     CHECK_GT(constant_size, 0)
@@ -287,58 +282,58 @@ void CodeGenCatapultC::VisitStmt_(const Allocate* op) {
       if (constant_size > 1) { // Transfer length one array to scalar
         if (sdsoc_mode) {
           // Allocate continuous physical mem
-          PrintType(op->type, stream);
-          stream << "* " << vid << " = (";
-          PrintType(op->type, stream);
-          stream << " *)sds_alloc(sizeof(";
-          PrintType(op->type, stream);
-          stream << ")";
+          // PrintType(op->type, stream);
+          // stream << "* " << vid << " = (";
+          // PrintType(op->type, stream);
+          // stream << " *)sds_alloc(sizeof(";
+          // PrintType(op->type, stream);
+          // stream << ")";
 
-          for (auto& v : op->extents) {
-            stream << "*" << v;
-          }
-          stream << ")";
+          // for (auto& v : op->extents) {
+          //   stream << "*" << v;
+          // }
+          // stream << ")";
         } else {
           if (is_fifo) {
-            stream << "hls::stream<";
-            PrintType(op->type, stream);
-            stream << " > " << vid;
+            // stream << "hls::stream<";
+            // PrintType(op->type, stream);
+            // stream << " > " << vid;
 
             // Not FIFO channels
           } else {
             if (vid.find("_reuse") != std::string::npos) {
-              PrintType(op->type, stream);
-              stream << ' '<< vid;
-              for (size_t i = 0; i < op->extents.size(); i++) {
-                stream << '[';
-                PrintExpr(op->extents[i], stream);
-                stream << "]";
-              }
+              // PrintType(op->type, stream);
+              // stream << ' '<< vid;
+              // for (size_t i = 0; i < op->extents.size(); i++) {
+              //   stream << '[';
+              //   PrintExpr(op->extents[i], stream);
+              //   stream << "]";
+              // }
             } else {
               if (sdsoc_mode) {
                 // allocate continuous phy mem
-                PrintType(op->type, stream);
-                stream << "* " << vid << " = (";
-                PrintType(op->type, stream);
-                stream << " *)sds_alloc(sizeof(";
-                PrintType(op->type, stream);
-                stream << ")";
+                // PrintType(op->type, stream);
+                // stream << "* " << vid << " = (";
+                // PrintType(op->type, stream);
+                // stream << " *)sds_alloc(sizeof(";
+                // PrintType(op->type, stream);
+                // stream << ")";
 
-                for (auto& v : op->extents) {
-                  stream << "*" << v;
-                }
-                stream << ")";
+                // for (auto& v : op->extents) {
+                //   stream << "*" << v;
+                // }
+                // stream << ")";
               } else {
-                PrintType(op->type, stream);
-                stream << ' '<< vid;
+                // PrintType(op->type, stream);
+                // stream << ' '<< vid;
                 // stream << '[' << constant_size << "]";
-                for (size_t i = 0; i < op->extents.size(); i++) {
-                  stream << '[';
-                  PrintExpr(op->extents[i], stream);
-                  stream << "]";
-                }
+                // for (size_t i = 0; i < op->extents.size(); i++) {
+                //   stream << '[';
+                //   PrintExpr(op->extents[i], stream);
+                //   stream << "]";
+                // }
                 if (!op->init_values.empty()) {
-                  stream << " = ";
+                  // stream << " = ";
                   if (constant_size == 1) PrintExpr(op->init_values[0], stream);
                   else {
                     std::vector<size_t> extents;
@@ -355,17 +350,17 @@ void CodeGenCatapultC::VisitStmt_(const Allocate* op) {
           }
         }
       } else {
-        PrintType(op->type, stream);
-        stream << ' ' << vid;
+        // PrintType(op->type, stream);
+        // stream << ' ' << vid;
       }
     }
-    stream << ";\n";
+    // stream << ";\n";
     for (size_t i = 0; i < op->attrs.size(); i++) 
-      this->PrintStmt(op->attrs[i]);
+      // this->PrintStmt(op->attrs[i]);
     buf_length_map_[buffer] = constant_size;
   }
   RegisterHandleType(op->buffer_var.get(), op->type);
-  this->PrintStmt(op->body);
+  // this->PrintStmt(op->body);
 }
 
 void CodeGenCatapultC::VisitStmt_(const For* op) {
@@ -479,7 +474,8 @@ class AllocateCollector final : public IRVisitor {
 
 void CodeGenCatapultC::VisitStmt_(const KernelStmt *op) {
   PrintIndent();
-  stream << op->name << "(";
+  // [For host code generation?]
+  // stream << op->name << "(";
 
   // Extract annotation values
   std::vector<argInfo> args_info;
@@ -487,12 +483,31 @@ void CodeGenCatapultC::VisitStmt_(const KernelStmt *op) {
     auto key = op->annotate_values[k].as<StringImm>(); CHECK(key);
   }
   // Print kernel function arguments
-  for (size_t i = 0; i < op->args.size(); i++) {
-    std::string arg_name = PrintExpr(op->args[i]);
-    stream << arg_name;
-    if (i < op->args.size() - 1) stream << ", ";
-  }
-  stream << ");\n";
+  // for (size_t i = 0; i < op->args.size(); i++) {
+  //   std::string arg_name = PrintExpr(op->args[i]);
+  //   stream << arg_name;
+  //   if (i < op->args.size() - 1) stream << ", ";
+  // }
+  // stream << ");\n";
+  // PrintIndent();
+  // stream << "void " << op->name << " (\n";
+
+  // // Extract annotation values
+  // std::vector<argInfo> args_info;
+  // for (size_t k = 0; k < op->annotate_keys.size(); k++) {
+  //   auto key = op->annotate_values[k].as<StringImm>(); CHECK(key);
+  // }
+  // // Print kernel function arguments
+  // for (size_t i = 0; i < op->args.size(); i++) {
+  //   Halide::Expr arg = op->args[i];
+  //   std::string arg_name = PrintExpr(arg);
+  //   stream << "ac_channel <";
+  //   PrintType(arg.type(), stream);
+  //   stream << "> ";
+  //   stream << arg_name;
+  //   if (i < op->args.size() - 1) stream << ",\n";
+  // }
+  // stream << ")\n";
 }
 
 void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
@@ -500,9 +515,8 @@ void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
   // save func states
   CodeGenC::SaveFuncState(f);
   CodeGenC::InitFuncState(f);
-  std::ostringstream save;
-  std::ostringstream pragma;
-  save << this->stream.str();
+  // std::ostringstream save;
+  // save << this->stream.str();
   this->stream.str("");
   this->stream.clear();
 
@@ -546,90 +560,92 @@ void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
   // print top-level kernel function
   if (is_kernel_func) {
 
-    int extern_scope = -1;
-    if (extern_mode) {
-      extern_scope  = BeginScope();
-      stream << "extern \"C\" {\n";
-    }
-
-    stream << "void " << op->name << "(";
+    // int extern_scope = -1;
+    // if (extern_mode) {
+    //   extern_scope  = BeginScope();
+    //   stream << "extern \"C\" {\n";
+    // }
+    stream << "#pragma hls_design top\n";
+    stream << "void " << "CCS_BLOCK(" << op->name << ") (";
     for (size_t i = 0; i < op->args.size(); ++i) {
       VarExpr v = op->args[i];
       var_shape_map_[v.get()] = op->arg_shapes[i];
       std::string vid = AllocVarID(v.get());
 
-      if (i != 0) stream << ", ";
+      if (i != 0) stream << ", \n";
       std::string str = PrintExpr(op->arg_types[i]);
       Type type = String2Type(str);
 
       // pass-by-value arguments
       if (var_shape_map_[v.get()].size() == 1 &&
           var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
+        stream << "ac_channel < ";
         PrintType(type, stream);
-        this->stream << " " << vid;
+        this->stream << " > " << vid;
 
       // pass-by-pointer arguments
       } else {
         CHECK(args_info.size() > i) << i << ":" << args_info.size();
-        auto info = args_info[i];
+        // auto info = args_info[i];
 
-        if (info.stream_type == StreamType::FIFO) {
-          auto bits = type.bits();
-          if (decl_stream.str().find("typedef qdma_axis<" + 
-                  std::to_string(bits)) == std::string::npos) {
-            decl_stream << "typedef qdma_axis<" << bits 
-                        << ", 0, 0, 0> pkt_b" << bits << ";\n";
-          }
-          stream << "hls::stream<pkt_b" << bits << "> &" << vid;
+        // if (info.stream_type == StreamType::FIFO) {
+        //   auto bits = type.bits();
+        //   if (decl_stream.str().find("typedef qdma_axis<" + 
+        //           std::to_string(bits)) == std::string::npos) {
+        //     decl_stream << "typedef qdma_axis<" << bits 
+        //                 << ", 0, 0, 0> pkt_b" << bits << ";\n";
+        //   }
+        //   stream << "hls::stream<pkt_b" << bits << "> &" << vid;
 
-        // Memory-mapped pointers
-        } else {
+        // Memory-mapped pointers should be all stream types
+        // } else {
+          stream << "ac_channel <";
           PrintType(type, stream);
-          auto size = var_shape_map_[v.get()];
-          stream << " " << vid;
-          for (auto& s : size) {
-            stream << "[" << s << "]";
-          }
-        }
+          // auto size = var_shape_map_[v.get()];
+          stream << "> " << vid;
+          // for (auto& s : size) {
+          //   stream << "[" << s << "]";
+          // }
+        // }
       }
     }
     stream << ") {\n";
 
-    if (extern_mode) {
-      // Port-level protocol interface
-      CHECK(op->args.size() == op->args.size());
-      for (size_t i = 0; i < op->args.size(); i++) {
-        if (op->arg_shapes[i].size() == 1 &&
-            op->arg_shapes[i][0].as<IntImm>()->value == 1) {
-          continue;
-        } else {
-          PrintIndent();
-          auto info = args_info[i];
+    // if (extern_mode) {
+    //   // Port-level protocol interface
+    //   CHECK(op->args.size() == op->args.size());
+    //   for (size_t i = 0; i < op->args.size(); i++) {
+    //     if (op->arg_shapes[i].size() == 1 &&
+    //         op->arg_shapes[i][0].as<IntImm>()->value == 1) {
+    //       continue;
+    //     } else {
+    //       PrintIndent();
+    //       auto info = args_info[i];
 
-          if (info.stream_type == StreamType::FIFO) {
-            stream << "#pragma HLS INTERFACE axis port="
-                   << info.name << "\n";
-          } else {
-            stream << "#pragma HLS INTERFACE m_axi port="
-                   << info.name << " "
-                   << "offset=slave bundle=gmem" << info.mem_port << "\n";
-          }
-        }
-      }
+    //       if (info.stream_type == StreamType::FIFO) {
+    //         stream << "#pragma HLS INTERFACE axis port="
+    //                << info.name << "\n";
+    //       } else {
+    //         stream << "#pragma HLS INTERFACE m_axi port="
+    //                << info.name << " "
+    //                << "offset=slave bundle=gmem" << info.mem_port << "\n";
+    //       }
+    //     }
+    //   }
 
-      // Block-level control interface 
-      for (size_t i = 0; i < op->args.size(); i++) {
-        auto info = args_info[i];
-        if (info.stream_type == StreamType::FIFO) continue;
-        PrintIndent();
-        stream << "#pragma HLS INTERFACE s_axilite port="
-               << info.name << " "
-               << "bundle=control\n";
-      }
-      PrintIndent();
-      stream << "#pragma HLS INTERFACE s_axilite"
-             << " port=return bundle=control\n";
-    }
+    //   // Block-level control interface 
+    //   for (size_t i = 0; i < op->args.size(); i++) {
+    //     auto info = args_info[i];
+    //     if (info.stream_type == StreamType::FIFO) continue;
+    //     PrintIndent();
+    //     stream << "#pragma HLS INTERFACE s_axilite port="
+    //            << info.name << " "
+    //            << "bundle=control\n";
+    //   }
+    //   PrintIndent();
+    //   stream << "#pragma HLS INTERFACE s_axilite"
+    //          << " port=return bundle=control\n";
+    // }
 
     // function body
     int func_scope = BeginScope();
@@ -637,17 +653,17 @@ void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
     PrintStmt(op->body);
 
     EndScope(func_scope);
-    PrintIndent();
+    // PrintIndent();
     stream << "}\n";
 
-    if (extern_mode) {
-        stream << "}\n\n";
-        EndScope(extern_scope);
-    }
+    // if (extern_mode) {
+    //     stream << "}\n\n";
+    //     EndScope(extern_scope);
+    // }
 
   // Non-top kernel function 
   } else {
-
+    stream << "#pragma hls_design\n";
     auto const_size = [&](Array<Expr> shape) -> int32_t {
       int32_t res = 1;
       for (auto s : shape) {
@@ -701,15 +717,15 @@ void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
     decl_stream << func_os.str() << ");\n";
     stream << func_os.str() << ") {\n";
     
-    PrintIndent();
-    stream << "#pragma HLS inline off\n";
+    // PrintIndent();
+    // stream << "#pragma HLS inline off\n";
 
     // function body
     int func_scope = BeginScope();
     range_ = CollectIterRange(op->body);
     PrintStmt(op->body);
     EndScope(func_scope);
-    PrintIndent();
+    // PrintIndent();
     stream << "}\n\n";
 
   }
@@ -718,7 +734,8 @@ void CodeGenCatapultC::VisitStmt_(const KernelDef* op) {
   module_stream << this->stream.str();
   this->stream.str("");
   this->stream.clear();
-  this->stream << save.str();
+  // this->stream << "end of kerneldef";
+  // this->stream << save.str();
   RestoreFuncState(f);
 }
 

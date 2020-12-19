@@ -49,7 +49,7 @@ def test_scalar_add():
     ]
   }
   p = hcl.platform.custom(config)
-  p.config(compile="vitis", mode="debug", backend="systemc")
+  p.config(compile="vitis", mode="debug", backend="catapultc")
   s.to([A, B], p.xcel)
   s.to(C, p.host)
   f = hcl.build(s, target=p)

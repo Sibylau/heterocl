@@ -1622,7 +1622,7 @@ struct argInfo {
 class InputDirectionCollector : public IRMutator {
  public:
   explicit InputDirectionCollector(
-    const std::unordered_set<std::string> _input_vars) : input_vars(_input_vars) { }
+    const Array<VarExpr>& _input_vars) : input_vars(_input_vars) { }
 
   Stmt Mutate_(const Store* op, const Stmt& s) {
     Stmt stmt = IRMutator::Mutate_(op, s);
@@ -1635,9 +1635,9 @@ class InputDirectionCollector : public IRMutator {
 
   bool checkBuffer(VarExpr var) {
     for (auto& v : input_vars) {
-      if (v == var.get()->name_hint) {
+      if (v.get() == var.get()) {
         HCL_DEBUG_LEVEL(2) << "[ INFO ] Buffer arg "
-            << v << " is written...";
+            << v.get()->name_hint << " is written...";
         return true;
       }
     }
@@ -1646,13 +1646,13 @@ class InputDirectionCollector : public IRMutator {
 
   unordered_map<string, bool>& Analyze(Stmt stmt) {
     for (auto& v : input_vars) {
-      is_arg_written[v] = false;
+      is_arg_written[v.get()->name_hint] = false;
     }
     Stmt s = Mutate(stmt);
     return is_arg_written; 
   }
 
-  std::unordered_set<std::string> input_vars;
+  const Array<VarExpr>& input_vars;
   unordered_map<string, bool> is_arg_written;
 };
 
@@ -1700,10 +1700,9 @@ void CodeGenSystemC::AddFunction(LoweredFunc f,
   this->PrintIndent();
   this->stream << "sc_in< bool > rst;\n";
 
-  std::unordered_set<std::string> input_args;
-  for (auto& kv : map_arg_type) {
-      auto arg_name = std::get<0>(kv.second);
-      input_args.insert(arg_name);
+  Array<VarExpr> input_args;
+  for (auto& v : f->args) {
+      input_args.push_back(v);
   }
   InputDirectionCollector idc(input_args);
   auto is_arg_written = idc.Analyze(f->body);
@@ -1712,32 +1711,17 @@ void CodeGenSystemC::AddFunction(LoweredFunc f,
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     string vid = AllocVarID(v.get());
-    if (map_arg_type.find(vid) == map_arg_type.end()) {
-      LOG(WARNING) << vid << " type not found\n";
-      // PrintType(v.type(), this->stream);
-      // this->stream << ' ' << vid;
-    } else {
-      auto arg = map_arg_type[vid];
-      // PrintType(std::get<1>(arg), this->stream);
-
-      auto arg_name = std::get<0>(arg);
-      const BufferNode* buf = f->api_args[i].as<BufferNode>();
-      if (v.type().is_handle() && buf) {
-        var_shape_map_[buf->data.get()] = buf->shape;
-      }
-
-      if (is_arg_written[arg_name]) {
-        this->stream << "cynw_p2p < ";
-        PrintType(v.type(), this->stream);
-        this->stream << " >::out " << arg_name << ";\n";
-      }
-      else {
-        this->stream << "cynw_p2p < ";
-        PrintType(v.type(), this->stream);
-        this->stream << " >::in " << arg_name << ";\n";
-      }
-      vid_array.push_back(arg_name);
+    if (is_arg_written[vid]) {
+      this->stream << "cynw_p2p < ";
+      PrintType(v.type(), this->stream);
+      this->stream << " >::out " << vid << ";\n";
     }
+    else {
+      this->stream << "cynw_p2p < ";
+      PrintType(v.type(), this->stream);
+      this->stream << " >::in " << vid << ";\n";
+    }
+    vid_array.push_back(vid);
   }
 
   this->stream << "\nSC_CTOR( " << f->name << " )\n";
@@ -1914,7 +1898,7 @@ void CodeGenSystemC::VisitStmt_(const Allocate* op) {
   CHECK(!is_zero(op->condition));
   std::string vid = AllocVarID(op->buffer_var.get());
 
-  stream << "allocate starts\n";
+
   if (op->new_expr.defined()) {
     CHECK_EQ(op->free_function, "nop");
     std::string new_data = PrintExpr(op->new_expr);
@@ -2035,8 +2019,6 @@ void CodeGenSystemC::VisitStmt_(const Allocate* op) {
   }
   RegisterHandleType(op->buffer_var.get(), op->type);
   this->PrintStmt(op->body);
-  stream << "allocate ends\n";
-
 }
 
 void CodeGenSystemC::VisitStmt_(const For* op) {
@@ -2217,14 +2199,14 @@ void CodeGenSystemC::VisitStmt_(const KernelDef* op) {
 
   // print top-level kernel function
   if (is_kernel_func) {
-    // stream << "test1\n";
+    stream << "test1\n";
     // int extern_scope = -1;
     // if (extern_mode) {
     //   extern_scope  = BeginScope();
     //   stream << "extern \"C\" {\n";
     // }
 
-    // stream << "void " << op->name << "(";
+    stream << "void " << op->name << "(";
     // for (size_t i = 0; i < op->args.size(); ++i) {
     //   VarExpr v = op->args[i];
     //   var_shape_map_[v.get()] = op->arg_shapes[i];

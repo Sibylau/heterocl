@@ -56,6 +56,7 @@ void IRVisitor::Visit_(const LetStmt *op) {
 }
 
 void IRVisitor::Visit_(const AttrStmt* op) {
+  std::cout << "visiting AttrStmt node\n";
   this->Visit(op->value);
   this->Visit(op->body);
 }
@@ -66,6 +67,7 @@ void IRVisitor::Visit_(const ExternModule* op) {
 }
 
 void IRVisitor::Visit_(const For *op) {
+  std::cout << "visiting For node\n";
   IRVisitor* v = this;
   v->Visit(op->min);
   v->Visit(op->extent);
@@ -73,6 +75,7 @@ void IRVisitor::Visit_(const For *op) {
 }
 
 void IRVisitor::Visit_(const Allocate *op) {
+  std::cout << "visiting Allocate node\n";
   IRVisitor* v = this;
   for (size_t i = 0; i < op->extents.size(); i++) {
     v->Visit(op->extents[i]);
@@ -88,11 +91,14 @@ void IRVisitor::Visit_(const Allocate *op) {
 }
 
 void IRVisitor::Visit_(const Load *op) {
+  std::cout << "visiting Load node\n";
+
   this->Visit(op->index);
   this->Visit(op->predicate);
 }
 
 void IRVisitor::Visit_(const Store *op) {
+  std::cout << "visiting Store node\n";
   this->Visit(op->value);
   this->Visit(op->index);
   this->Visit(op->predicate);
