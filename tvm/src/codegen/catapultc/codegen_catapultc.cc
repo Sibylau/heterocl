@@ -38,6 +38,7 @@ void CodeGenCatapultC::AddFunction(LoweredFunc f,
   this->decl_stream << "#include <ac_int.h>\n";
   this->decl_stream << "#include <ac_float.h>\n";
   this->decl_stream << "#include <ac_channel.h>\n\n";
+  this->decl_stream << "#include <mc_scverify.h>\n\n";
 
   // setup codegen mode
   // if (map_arg_type.count("sdsoc")) {
@@ -317,116 +318,123 @@ void CodeGenCatapultC::VisitStmt_(const Allocate* op) {
     stream << "* "<< vid << '=' << new_data << ";\n";
   } else {
     // LOG(INFO) << "Allocate expr not defined\n";
-    // int32_t constant_size = op->constant_allocation_size();
-    // CHECK_GT(constant_size, 0)
-    //     << "Can only handle constant size stack allocation for now";
-    // const Variable* buffer = op->buffer_var.as<Variable>();
-    // var_shape_map_[buffer] = op->extents;
+    int32_t constant_size = op->constant_allocation_size();
+    CHECK_GT(constant_size, 0)
+        << "Can only handle constant size stack allocation for now";
+    const Variable* buffer = op->buffer_var.as<Variable>();
+    var_shape_map_[buffer] = op->extents;
 
-    // std::string scope; // Allocate on local scope by default
-    // auto it = alloc_storage_scope_.find(buffer);
-    // if (it != alloc_storage_scope_.end())
-    //   scope = alloc_storage_scope_.at(buffer);
-    // else scope = "local";
+    std::string scope; // Allocate on local scope by default
+    auto it = alloc_storage_scope_.find(buffer);
+    if (it != alloc_storage_scope_.end())
+      scope = alloc_storage_scope_.at(buffer);
+    else scope = "local";
 
-    // // FIFO Checking 
+    // need to fill in fifo logic
+    // FIFO Checking 
     // bool is_fifo = false;
     // for (auto attr : op->attrs) {
     //   if (attr.as<StreamStmt>()) {
     //     is_fifo = true;
     //   }
     // }
-    // // Auto-apply dataflow
+
+    // Auto-apply dataflow
     // if (is_fifo) {
     //   if (stream.str().find("#pragma HLS dataflow") == std::string::npos) {
     //     LOG(INFO) << "Auto-applying dataflow optimization...";
-    //     // PrintIndent();
-    //     // stream << "#pragma HLS dataflow\n";
+    //     PrintIndent();
+    //     stream << "#pragma HLS dataflow\n";
     //   }
     // }
 
-    // // this->PrintIndent();
-    // // Skip partitioned stage
-    // if (vid.find("_partitioned") == std::string::npos) {
-    //   if (constant_size > 1) { // Transfer length one array to scalar
-    //     if (sdsoc_mode) {
-    //       // Allocate continuous physical mem
-    //       // PrintType(op->type, stream);
-    //       // stream << "* " << vid << " = (";
-    //       // PrintType(op->type, stream);
-    //       // stream << " *)sds_alloc(sizeof(";
-    //       // PrintType(op->type, stream);
-    //       // stream << ")";
+    this->PrintIndent();
+    // Skip partitioned stage
+    if (vid.find("_partitioned") == std::string::npos) {
+      if (constant_size > 1) { // Transfer length one array to scalar
+        // if (sdsoc_mode) {
+        //   // Allocate continuous physical mem
+        //   PrintType(op->type, stream);
+        //   stream << "* " << vid << " = (";
+        //   PrintType(op->type, stream);
+        //   stream << " *)sds_alloc(sizeof(";
+        //   PrintType(op->type, stream);
+        //   stream << ")";
 
-    //       // for (auto& v : op->extents) {
-    //       //   stream << "*" << v;
-    //       // }
-    //       // stream << ")";
-    //     } else {
-    //       if (is_fifo) {
-    //         // stream << "hls::stream<";
-    //         // PrintType(op->type, stream);
-    //         // stream << " > " << vid;
+        //   for (auto& v : op->extents) {
+        //     stream << "*" << v;
+        //   }
+        //   stream << ")";
+        // } else {
+          // if (is_fifo) {
+          //   stream << "hls::stream<";
+          //   PrintType(op->type, stream);
+          //   stream << " > " << vid;
 
-    //         // Not FIFO channels
-    //       } else {
-    //         if (vid.find("_reuse") != std::string::npos) {
-    //           // PrintType(op->type, stream);
-    //           // stream << ' '<< vid;
-    //           // for (size_t i = 0; i < op->extents.size(); i++) {
-    //           //   stream << '[';
-    //           //   PrintExpr(op->extents[i], stream);
-    //           //   stream << "]";
-    //           // }
-    //         } else {
-    //           // if (sdsoc_mode) {
-    //           //   // allocate continuous phy mem
-    //           //   // PrintType(op->type, stream);
-    //           //   // stream << "* " << vid << " = (";
-    //           //   // PrintType(op->type, stream);
-    //           //   // stream << " *)sds_alloc(sizeof(";
-    //           //   // PrintType(op->type, stream);
-    //           //   // stream << ")";
+            // Not FIFO channels
+          // } else {
+            if (vid.find("_reuse") != std::string::npos) {
+              PrintType(op->type, stream);
+              stream << ' '<< vid;
+              for (size_t i = 0; i < op->extents.size(); i++) {
+                stream << '[';
+                PrintExpr(op->extents[i], stream);
+                stream << "]";
+              }
+            } else {
+              // if (sdsoc_mode) {
+              //   // allocate continuous phy mem
+              //   PrintType(op->type, stream);
+              //   stream << "* " << vid << " = (";
+              //   PrintType(op->type, stream);
+              //   stream << " *)sds_alloc(sizeof(";
+              //   PrintType(op->type, stream);
+              //   stream << ")";
 
-    //           //   // for (auto& v : op->extents) {
-    //           //   //   stream << "*" << v;
-    //           //   // }
-    //           //   // stream << ")";
-    //           // } else {
-    //           //   // PrintType(op->type, stream);
-    //           //   // stream << ' '<< vid;
-    //           //   // stream << '[' << constant_size << "]";
-    //           //   // for (size_t i = 0; i < op->extents.size(); i++) {
-    //           //     // stream << '[';
-    //           //     // PrintExpr(op->extents[i], stream);
-    //           //     // stream << "]";
-    //           //   }
-    //             if (!op->init_values.empty()) {
-    //               // stream << " = ";
-    //               if (constant_size == 1) PrintExpr(op->init_values[0], stream);
-    //               else {
-    //                 std::vector<size_t> extents;
-    //                 for (size_t i = 0; i < op->extents.size(); i++) {
-    //                   const int64_t* extent = as_const_int(op->extents[i]);
-    //                   CHECK(extent != nullptr) << "Extent of an init array cannot be a variable\n";
-    //                   extents.push_back(*extent);
-    //                 }
-    //                 PrintArray(op->init_values, extents, stream, 0, 0);
-    //               }
-    //             }
-    //           }
-    //         }
-    //       }
-    //     }
-    //   } else {
-    //     // PrintType(op->type, stream);
-    //     // stream << ' ' << vid;
-    //   }
-    // }
-    // // stream << ";\n";
-    // // for (size_t i = 0; i < op->attrs.size(); i++) 
-    // //   this->PrintStmt(op->attrs[i]);
-    // // buf_length_map_[buffer] = constant_size;
+              //   for (auto& v : op->extents) {
+              //     stream << "*" << v;
+              //   }
+              //   stream << ")";
+              // } else {
+                PrintType(op->type, stream);
+                stream << ' '<< vid;
+                // stream << '[' << constant_size << "]";
+                for (size_t i = 0; i < op->extents.size(); i++) {
+                  stream << '[';
+                  PrintExpr(op->extents[i], stream);
+                  stream << "]";
+                }
+                if (!op->init_values.empty()) {
+                  stream << " = ";
+                  if (constant_size == 1) PrintExpr(op->init_values[0], stream);
+                  else {
+                    std::vector<size_t> extents;
+                    for (size_t i = 0; i < op->extents.size(); i++) {
+                      const int64_t* extent = as_const_int(op->extents[i]);
+                      CHECK(extent != nullptr) << "Extent of an init array cannot be a variable\n";
+                      extents.push_back(*extent);
+                    }
+                    PrintArray(op->init_values, extents, stream, 0, 0);
+                  }
+                }
+              // }
+            }
+        
+          // }
+        // }
+        stream << ";\n";
+      } else {
+        if (vid != "_top") {
+          PrintType(op->type, stream);
+          stream << ' ' << vid;
+          stream << ";\n";
+        }
+        LOG(INFO) << "allocate: constant size = 1, vid = " << vid << "\n";
+      }
+    }
+    for (size_t i = 0; i < op->attrs.size(); i++) 
+      this->PrintStmt(op->attrs[i]);
+    buf_length_map_[buffer] = constant_size;
   }
   // LOG(INFO) << "Visit Allocate\n";
   RegisterHandleType(op->buffer_var.get(), op->type);
