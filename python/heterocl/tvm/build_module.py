@@ -458,6 +458,10 @@ def build_fpga_kernel(sch, args, target, name="default_function", schedule_name=
         elif target.tool.name == "rocket":
             host = target.host.lang.replace("c", "rv64_ppac")
 
+        elif target.tool.name == "catapultc": ## jl3952
+            host = target.host.lang = "catapultc" ## jl3952
+            xcel = target.xcel.lang = "catapultc" ## jl3952
+
         # return simulation built function
         mode = str(target.tool.mode)
         if "|" in mode:
@@ -570,6 +574,7 @@ def build(sch,
     See the note on :any:`tvm.target` on target string format.
     """
     if isinstance(target, platform):
+        print(target) # jl3952
         return build_fpga_kernel(sch, args, target, name=name, schedule_name=schedule_name)
     else: # default string type target
         target = _target.current_target() if target is None else target
