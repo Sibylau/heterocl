@@ -527,6 +527,7 @@ def build_fpga_kernel(sch, args, target, name="default_function", schedule_name=
         raise AttributeError("Cannot find the target builder %s" % target)
     return None
 
+
 def build(sch,
           args=None,
           target=None,
@@ -574,7 +575,12 @@ def build(sch,
     See the note on :any:`tvm.target` on target string format.
     """
     if isinstance(target, platform):
-        print(target) # jl3952
+        # jl3952 >>>>
+        # print(target) 
+        # if "asic" in target.target_name: 
+        #     return build_asic_kernel(sch, args, target, name=name, schedule_name=schedule_name)
+        # else:
+        # jl3952 <<<<
         return build_fpga_kernel(sch, args, target, name=name, schedule_name=schedule_name)
     else: # default string type target
         target = _target.current_target() if target is None else target
