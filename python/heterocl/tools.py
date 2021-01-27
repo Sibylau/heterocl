@@ -4,9 +4,11 @@
 model_table = {
   "xilinx" : ["fpga_xc7z045", "fpga_xcvu19p", "fpga_xcu250"],
   "intel"  : ["cpu_e5", "cpu_i7", "fpga_stratix10_gx", 
-              "fpga_stratix10_dx", "fpga_stratix10_mx", "fpga_arria10"],
+              "fpga_stratix10_dx", "fpga_stratix10_mx", "fpga_arria10",
+              "asic_stratus"], ## jl3952
   "arm"    : ["cpu_a7", "cpu_a9", "cpu_a53"],
-  "riscv"  : ["cpu_riscv"]
+  "riscv"  : ["cpu_riscv"],
+  "mentor" : ["asic_catapultc"] ## jl3952
 }
 
 option_table = {
@@ -16,6 +18,7 @@ option_table = {
   "vitis"   : ("sw_sim", {"version" : "2019.2", "clock" : "1"}),
   "vivado_hls" : ("sw_sim", {"version" : "2017.1"}),
   "rocket"     : ("debug", {"RISCV" : ""}),
+  "catapultc": ("sw_sim", {"version" : "10.5a"}), ## jl3952
 
   # refer to xilinx2016_1/ug904-vivado-implementation.pdf
   "vivado"     : ("pnr",

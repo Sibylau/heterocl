@@ -217,6 +217,23 @@ class FPGA(Device):
         return "fpga-" + self.vendor + "-" + str(self.model) + \
                ":lang-" + self.lang + ":dev-id-" + str(self.dev_id)
 
+## jl3952 >>>>
+class ASIC(Device):
+    """asic device with different models"""
+    def __init__(self, vendor, model, **kwargs):
+        if vendor not in ["mentor", "intel"]: 
+            raise DeviceError(vendor + " not supported yet")
+        if model is not None:
+            assert "asic_" + model in model_table[vendor], \
+                "{} not supported yet".format(model)
+        else:
+            model = model_table[vendor][0]
+        super(ASIC, self).__init__("ASIC", vendor, model, **kwargs)
+    def __repr__(self):
+        return "asic-" + self.vendor + "-" + str(self.model) + \
+               ":lang-" + self.lang + ":dev-id-" + str(self.dev_id)
+## jl3952 <<<<
+
 class GPU(Device):
     """gpu device with different models"""
     def __init__(self, vendor, model, **kwargs):
@@ -368,7 +385,7 @@ class platform(with_metaclass(env, object)):
             self.tool.mode = mode
 
         if backend is not None: # set up backend lang
-            assert backend in ["vhls", "aocl"], "not support backend lang " + backend
+            assert backend in ["vhls", "aocl", "catapultc"], "not support backend lang " + backend
             self.xcel.lang = backend
         else:   
             if compile == "vitis":
@@ -437,7 +454,7 @@ class dev(object):
 
     @classmethod
     def asic(cls, vendor, model=None):
-        return FPGA(vendor, model)
+        return ASIC(vendor, model) ## jl3952: FPGA->ASIC
 
     @classmethod
     def gpu(cls, vendor, model):
@@ -465,6 +482,8 @@ def device_to_str(dtype):
             return "cpu_" + str(dtype.model)
         elif isinstance(dtype, FPGA):
             return "fpga_" + str(dtype.model)
+        elif isinstance(dtype, ASIC): ## jl3952
+            return "asic_" + str(dtype.model) ## jl3952
     else:
         if not isinstance(dtype, str):
             raise DeviceError("Unsupported device type format")
@@ -492,6 +511,8 @@ def device_to_hcl(dtype):
             return GPU(model)
         elif device == "fpga":
             return FPGA(model)
+        elif device == "asic": ## jl3952
+            return ASIC(model) ## jl3952
         else:
             raise DeviceError("Unrecognized device type")
     else:
