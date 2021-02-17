@@ -19,6 +19,8 @@ namespace codegen {
 class CodeGenCatapultCTB final : public CodeGenHLSC {
  public:
   void AddFunction(LoweredFunc f, str2tupleMap<std::string, Type> map_arg_type);
+  std::string GetHost();
+
   void PrintType(Type t, std::ostream& os) override;
   
   void VisitExpr_(const Min* op, std::ostream& os) override;
@@ -28,7 +30,7 @@ class CodeGenCatapultCTB final : public CodeGenHLSC {
   void VisitExpr_(const StreamExpr* op, std::ostream& os) override;
   void VisitExpr_(const Call *op, std::ostream& os) override;
   void VisitExpr_(const Load *op, std::ostream& os) override;
-   void VisitExpr_(const Cast *op, std::ostream& os);
+  void VisitExpr_(const Cast *op, std::ostream& os);
 
   void VisitStmt_(const Allocate* op) override;
   void VisitStmt_(const Store* op) override;

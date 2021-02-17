@@ -53,15 +53,17 @@ TVM_REGISTER_API("codegen.build_catapultc")
     if (args.size() == 1) {
       *rv = BuildCatapultC<CodeGenCatapultC>(args[0], OutputMode::HostDevice);
     } else {
-      CHECK(args.size() == 3);
-      *rv = BuildCatapultC<CodeGenCatapultCTB>(args[0], 
-          static_cast<OutputMode>(args[1].operator int()));
-      // auto mode = static_cast<OutputMode>(args[1].operator int());
-      // if (mode == OutputMode::HostOnly) {
-      //   *rv = BuildCatapultC<CodeGenCatapultCTB>(args[0], mode); 
-      // } else if (mode == OutputMode::DeviceOnly) {
-      //   *rv = BuildCatapultC<CodeGenCatapultC>(args[0], mode);
-      // }
+      auto mode = static_cast<OutputMode>(args[1].operator int());
+      if (mode == OutputMode::HostOnly) {
+        LOG(INFO) << "mode == host_only\n";
+        *rv = BuildCatapultC<CodeGenCatapultCTB>(args[0], mode); 
+      } else if (mode == OutputMode::DeviceOnly) {
+        LOG(INFO) << "mode == device_only\n";
+        *rv = BuildCatapultC<CodeGenCatapultC>(args[0], mode);
+      }
+      else {
+        LOG(INFO) << "mode == host_device\n";
+      }
     } 
   });
 

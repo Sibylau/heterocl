@@ -34,20 +34,11 @@ struct argInfo {
 void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
   // write header files
-  // std::ostringstream test_stream;
-  this->decl_stream << "#include <ac_int.h>\n";
-  this->decl_stream << "#include <ac_float.h>\n";
-  this->decl_stream << "#include <ac_channel.h>\n\n";
-  this->decl_stream << "#include <mc_scverify.h>\n\n";
+  decl_stream << "#include <" << f->name << ".h>\n";
+  decl_stream << "#include <iostream.h>\n";
+  decl_stream << "#include <mc_scverify.h>\n\n";
 
-  // setup codegen mode
-  // if (map_arg_type.count("sdsoc")) {
-  //   sdsoc_mode = true;
-  //   this->decl_stream << "#include \"sds_lib.h\"\n\n";
-  // } else if (map_arg_type.count("sdaccel")) {
-  //   extern_mode = true;
-  //   this->decl_stream << "\n";
-  // }
+  decl_stream << "using namespace std;\n\n";
 
   // clear previous generated state.
   this->InitFuncState(f);
@@ -57,63 +48,44 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
 
-  // HCL_DEBUG_LEVEL(2) << "Adding VHLS function...";
-  // generate top function signature
-  stream << "void " << "CCS_MAIN(" << f->name << ") (\n";
+  stream << "CCS_MAIN(int argv, char **argc) {\n";
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     std::string vid = AllocVarID(v.get());
-    if (i != 0) stream << ", \n";
     // check type in the arg map
     if (map_arg_type.find(vid) == map_arg_type.end()) {
       LOG(WARNING) << vid << " type not found\n";
-      PrintIndent();
-      // this->stream << "ac_channel <";
-      PrintType(v.type(), this->stream);
-      this->stream << " " << vid;
+
     } else {
       auto arg = map_arg_type[vid];
-      PrintIndent();
-      // this->stream << "ac_channel <";
-      PrintType(std::get<1>(arg), this->stream);
-      // this->stream << "* " << std::get<0>(arg);
       const BufferNode* buf = f->api_args[i].as<BufferNode>();
       if (v.type().is_handle() && buf) {
         var_shape_map_[buf->data.get()] = buf->shape;
         auto it = alloc_storage_scope_.find(v.get());
-        if (it != alloc_storage_scope_.end()) {
-          PrintStorageScope(it->second, stream);
-        }
-        this->stream << " " << std::get<0>(arg);
-
-        // LOG(INFO) << "type in map: arg=" << std::get<0>(arg) << "\n";
-        // do not print array dimensions when using ac_channel
-        // print multi-dim array
-        this->stream << "[";
-        int count = 0;
-        for (auto& s : buf->shape) {
-          if (count != 0) this->stream << "][";
-          this->stream << s;
-          count = count + 1;
-        }
-        this->stream << "]";
-      } else {
-        this->stream << " " << std::get<0>(arg);
       }
     }
   }
 
-  stream << ") {\n";
   int func_scope = this->BeginScope();
   range_ = CollectIterRange(f->body);
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
-  this->stream << "}\n\n";
+  stream << "CCS_DESIGN(" << f->name << ") (";
+  for (size_t i = 0; i < f->args.size(); ++i) {
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    auto arg = map_arg_type[vid];
+    if (i != 0) stream << ", ";
+    stream << std::get<0>(arg);
+  }
+  stream << ");\n\n";
+  stream << "CCS_RETURN(0);\n" << "}\n\n";
+}
 
-  // close soda header handle
-  if (soda_header_.is_open())
-    soda_header_.close();
+std::string CodeGenCatapultCTB::GetHost() {
+  return decl_stream.str() + 
+      stream.str(); 
 }
 
 void CodeGenCatapultCTB::PrintType(Type t, std::ostream& os) {
@@ -124,10 +96,10 @@ void CodeGenCatapultCTB::PrintType(Type t, std::ostream& os) {
       os << "ac_int<" << t.bits() << ", true>";
     } else if (t.is_ufixed()) {
       LOG(WARNING) << "ac_fixed not yet implemented\n";
-      os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+      os << "ac_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
     } else {
       LOG(WARNING) << "ac_fixed not yet implemented\n";
-      os << "ap_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
+      os << "ac_fixed<" << t.bits() << ", " << t.bits() - t.fracs() << ">";
     }
   } else {
     CodeGenC::PrintType(t, os);
@@ -216,7 +188,7 @@ void CodeGenCatapultCTB::VisitStmt_(const Store* op) {
     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
     std::string rhs = PrintExpr(ss->value);
     PrintIndent();
-    this->stream << ref
+    stream << ref
                  << "(" << PrintExpr(new_index_left) << ", " << PrintExpr(ss->index_right)
                  << ") = " << rhs << ";\n";
   } else if (const SetBit* sb = op->value.as<SetBit>()) {
@@ -224,26 +196,26 @@ void CodeGenCatapultCTB::VisitStmt_(const Store* op) {
     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
     PrintIndent();
     LOG(INFO) << "Store setbit case\n";
-    this->stream << ref
+    stream << ref
                  << "[" << PrintExpr(sb->index)
                  << "] = " << PrintExpr(sb->value) << ";\n";
-    /*this->stream << ref 
+    /*stream << ref 
                  << ".write( " << PrintExpr(sb->value) << ");\n";*/
   } else if (auto expr_op = op->value.as<Select>()) {
     Type t = op->value.type();
     std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
     PrintIndent();
-    this->stream << "if (" << PrintExpr(expr_op->condition) << ") { \n";
+    stream << "if (" << PrintExpr(expr_op->condition) << ") { \n";
     PrintIndent();
-    this->stream << "  " << ref 
+    stream << "  " << ref 
         << " = " << PrintExpr(expr_op->true_value) << ";\n";
     PrintIndent();
-    this->stream << "} else { \n";
+    stream << "} else { \n";
     PrintIndent();
-    this->stream << "  " << ref 
+    stream << "  " << ref 
         << " = " << PrintExpr(expr_op->false_value) << ";\n";
     PrintIndent();
-    this->stream << "}\n";
+    stream << "}\n";
   } else {
     // not falling back to CodeGenC
     CodeGenC::VisitStmt_(op);
@@ -627,11 +599,11 @@ class AllocateCollector final : public IRVisitor {
   CodeGenC::SaveFuncState(f);
   CodeGenC::InitFuncState(f);
   std::ostringstream save;
-  save << this->stream.str();
+  save << stream.str();
   save << "visiting kerneldef\n";
-  this->stream << save.str();
-  this->stream.str("");
-  this->stream.clear();
+  stream << save.str();
+  stream.str("");
+  stream.clear();
 
   // skip the first underscore
   GetUniqueName("_");
@@ -693,7 +665,7 @@ class AllocateCollector final : public IRVisitor {
       if (var_shape_map_[v.get()].size() == 1 &&
           var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
         PrintType(type, stream);
-        this->stream << " " << vid;
+        stream << " " << vid;
 
       // pass-by-pointer arguments
       } else {
@@ -842,10 +814,10 @@ class AllocateCollector final : public IRVisitor {
   }
 
   // restore default stream
-  module_stream << this->stream.str();
-  this->stream.str("");
-  this->stream.clear();
-  this->stream << save.str();
+  module_stream << stream.str();
+  stream.str("");
+  stream.clear();
+  stream << save.str();
   RestoreFuncState(f);
 }*/
 
