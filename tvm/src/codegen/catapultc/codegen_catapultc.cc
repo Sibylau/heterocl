@@ -38,119 +38,44 @@ namespace TVM
     void CodeGenCatapultC::AddFunction(LoweredFunc f,
                                        str2tupleMap<std::string, Type> map_arg_type)
     {
-      // write header files
-      std::ostringstream head_decl_stream;
-      decl_stream << "#include <ac_int.h>\n";
-      decl_stream << "#include <ac_float.h>\n";
-      decl_stream << "#include <ac_channel.h>\n\n";
-      decl_stream << "#include <mc_scverify.h>\n\n";
-
-      // decl_stream << "#include <" << f->name << ".h>\n\n";
-
       // clear previous generated state.
       this->InitFuncState(f);
       map_arg_type_ = map_arg_type;
       // add to alloc buffer type.
       for (const auto &kv : f->handle_data_type)
-      {
         RegisterHandleType(kv.first.get(), kv.second.type());
-      }
 
-      // HCL_DEBUG_LEVEL(2) << "Adding VHLS function...";
-      // generate top function signature
-      // stream << "#pragma design top\n";
-      // stream << "void "
-      //        << "CCS_BLOCK(" << f->name << ") (\n";
-      // head_decl_stream << "void " << f->name << "(\n";
       for (size_t i = 0; i < f->args.size(); ++i)
       {
         Var v = f->args[i];
         std::string vid = AllocVarID(v.get());
-        if (i != 0)
-        {
-          // stream << ", \n";
-          // head_decl_stream << ", \n";
-        }
+
         // check type in the arg map
         if (map_arg_type.find(vid) == map_arg_type.end())
         {
           LOG(WARNING) << vid << " type not found\n";
-          PrintIndent();
-          // stream << "ac_channel <";
-          // PrintType(v.type(), stream);
-          // stream << " " << vid;
-          // PrintType(v.type(), head_decl_stream);
-          // head_decl_stream << " " << vid;
         }
         else
         {
           auto arg = map_arg_type[vid];
-          PrintIndent();
-          // stream << "ac_channel <";
-          // PrintType(std::get<1>(arg), stream);
-          // PrintType(std::get<1>(arg), head_decl_stream);
-          // stream << "* " << std::get<0>(arg);
           const BufferNode *buf = f->api_args[i].as<BufferNode>();
           if (v.type().is_handle() && buf)
           {
             var_shape_map_[buf->data.get()] = buf->shape;
-            auto it = alloc_storage_scope_.find(v.get());
-            if (it != alloc_storage_scope_.end())
-            {
-              // PrintStorageScope(it->second, stream);
-              // PrintStorageScope(it->second, head_decl_stream);
-            }
-            // stream << " " << std::get<0>(arg);
-            // head_decl_stream << " " << std::get<0>(arg);
-
-            // LOG(INFO) << "type in map: arg=" << std::get<0>(arg) << "\n";
-            // do not print array dimensions when using ac_channel
-            // print multi-dim array
-            // stream << "[";
-            // head_decl_stream << "[";
-            // int count = 0;
-            // for (auto &s : buf->shape)
-            // {
-            //   if (count != 0)
-            //   {
-            //     // stream << "][";
-            //     // head_decl_stream << "][";
-            //   }
-            //   // stream << s;
-            //   // head_decl_stream << s;
-            //   count = count + 1;
-            // }
-            // stream << "]";
-            // head_decl_stream << "]";
-          }
-          else
-          {
-            // stream << " " << std::get<0>(arg);
-            // head_decl_stream << " " << std::get<0>(arg);
+            // auto it = alloc_storage_scope_.find(v.get());
           }
         }
       }
 
-      // stream << ") {\n";
-
       // transform lower case function name to upper case
       std::string func_name = f->name;
       std::transform(func_name.begin(), func_name.end(), func_name.begin(), ::toupper);
-      // assembly head file streams
-      // head_stream << "#ifndef " << func_name << "_H__\n";
-      // head_stream << "#define " << func_name << "_H__\n";
-      // head_stream << "#include <ac_int.h>\n"
-      //             << "#include <ac_channel.h>\n\n";
+
       int func_scope = this->BeginScope();
       range_ = CollectIterRange(f->body);
       this->PrintStmt(f->body);
       this->EndScope(func_scope);
       this->PrintIndent();
-      // stream << "}\n\n";
-      // head_stream << head_decl_stream.str() << ");\n\n";
-      // head_stream << "#endif\n";
-      // LOG(INFO) << "head_stream: \n"
-      //           << head_stream.str() << "\n";
     }
 
     std::string CodeGenCatapultC::GetDevice()
@@ -223,37 +148,8 @@ namespace TVM
       os << ")";
     }
 
-    // void CodeGenCatapultC::VisitExpr_(const Load *op, std::ostream &os)
-    // {
-    //   std::string vid = GetVarID(op->buffer_var.get());
-    //   // TODO: find a betetr way to track streaming channels
-    //   // LOG(INFO) << "calling load\n";
-    //   if (stream_vars.find(vid) != stream_vars.end())
-    //   {
-    //     PrintIndent();
-    //     stream << vid << "_temp = " << vid << ".read();\n";
-    //     os << vid << "_temp.get_data()";
-    //   }
-    //   else
-    //   {
-    //     CodeGenC::VisitExpr_(op, os);
-    //     // LOG(INFO) << "try to call default codegenc load\n";
-    //     // if (op->type.lanes() == 1) {
-    //     //   // std::string ref = GetBufferRef(op->type, op->buffer_var.get(), op->index);
-    //     //   // os << ref;
-    //     //   // std::string vid = GetVarID(op->buffer_var.get());
-    //     //   os << vid << ".read() ";
-    //     // } else {
-    //     //   // LOG(INFO) << "multiple lanes\n";
-    //     //   // need to fill in the else logic
-    //     // }
-    //     // CodeGenC::VisitExpr_(op, os);
-    //   }
-    // }
-
     void CodeGenCatapultC::VisitStmt_(const Store *op)
     {
-      // LOG(INFO) << "visiting store\n";
       // where does stream_vars get updated?
       std::string vid = GetVarID(op->buffer_var.get());
       if (stream_vars.find(vid) != stream_vars.end())
@@ -287,12 +183,9 @@ namespace TVM
         Type t = op->value.type();
         std::string ref = this->GetBufferRef(t, op->buffer_var.get(), op->index);
         PrintIndent();
-        // LOG(INFO) << "Store setbit case\n";
         stream << ref
                << "[" << PrintExpr(sb->index)
                << "] = " << PrintExpr(sb->value) << ";\n";
-        /*stream << ref 
-                 << ".write( " << PrintExpr(sb->value) << ");\n";*/
       }
       else if (auto expr_op = op->value.as<Select>())
       {
@@ -405,58 +298,19 @@ namespace TVM
         const Variable *buffer = op->buffer_var.as<Variable>();
         var_shape_map_[buffer] = op->extents;
 
-        std::string scope; // Allocate on local scope by default
-        auto it = alloc_storage_scope_.find(buffer);
-        if (it != alloc_storage_scope_.end())
-          scope = alloc_storage_scope_.at(buffer);
-        else
-          scope = "local";
-
-        // need to fill in fifo logic
-        // FIFO Checking
-        // bool is_fifo = false;
-        // for (auto attr : op->attrs) {
-        //   if (attr.as<StreamStmt>()) {
-        //     is_fifo = true;
-        //   }
-        // }
-
-        // Auto-apply dataflow
-        // if (is_fifo) {
-        //   if (stream.str().find("#pragma HLS dataflow") == std::string::npos) {
-        //     LOG(INFO) << "Auto-applying dataflow optimization...";
-        //     PrintIndent();
-        //     stream << "#pragma HLS dataflow\n";
-        //   }
-        // }
+        // std::string scope; // Allocate on local scope by default
+        // auto it = alloc_storage_scope_.find(buffer);
+        // if (it != alloc_storage_scope_.end())
+        //   scope = alloc_storage_scope_.at(buffer);
+        // else
+        //   scope = "local";
 
         this->PrintIndent();
         // Skip partitioned stage
         if (vid.find("_partitioned") == std::string::npos)
         {
           if (constant_size > 1)
-          { // Transfer length one array to scalar
-            // if (sdsoc_mode) {
-            //   // Allocate continuous physical mem
-            //   PrintType(op->type, stream);
-            //   stream << "* " << vid << " = (";
-            //   PrintType(op->type, stream);
-            //   stream << " *)sds_alloc(sizeof(";
-            //   PrintType(op->type, stream);
-            //   stream << ")";
-
-            //   for (auto& v : op->extents) {
-            //     stream << "*" << v;
-            //   }
-            //   stream << ")";
-            // } else {
-            // if (is_fifo) {
-            //   stream << "hls::stream<";
-            //   PrintType(op->type, stream);
-            //   stream << " > " << vid;
-
-            // Not FIFO channels
-            // } else {
+          { 
             if (vid.find("_reuse") != std::string::npos)
             {
               PrintType(op->type, stream);
@@ -470,23 +324,8 @@ namespace TVM
             }
             else
             {
-              // if (sdsoc_mode) {
-              //   // allocate continuous phy mem
-              //   PrintType(op->type, stream);
-              //   stream << "* " << vid << " = (";
-              //   PrintType(op->type, stream);
-              //   stream << " *)sds_alloc(sizeof(";
-              //   PrintType(op->type, stream);
-              //   stream << ")";
-
-              //   for (auto& v : op->extents) {
-              //     stream << "*" << v;
-              //   }
-              //   stream << ")";
-              // } else {
               PrintType(op->type, stream);
               stream << ' ' << vid;
-              // stream << '[' << constant_size << "]";
               for (size_t i = 0; i < op->extents.size(); i++)
               {
                 stream << '[';
@@ -510,11 +349,7 @@ namespace TVM
                   PrintArray(op->init_values, extents, stream, 0, 0);
                 }
               }
-              // }
             }
-
-            // }
-            // }
             stream << ";\n";
           }
           else
@@ -657,29 +492,6 @@ namespace TVM
       stream << "}\n";
     }
 
-    /*void CodeGenCatapultC::VisitStmt_(const Partition* op) {
-  PrintIndent();
-  stream << "#pragma HLS array_partition variable=";
-  std::string vid = GetVarID(op->buffer_var.get());
-  stream << vid << " ";
-  switch (op->partition_type) {
-    case PartitionType::Complete:
-      stream << "complete";
-      break;
-    case PartitionType::Block:
-      stream << "block";
-      break;
-    case PartitionType::Cyclic:
-      stream << "cyclic";
-      break;
-  }
-  stream << " dim=" << op->dim;
-  if (op->partition_type != PartitionType::Complete) {
-    stream << " factor=" << op->factor;
-  }
-  stream << "\n";
-}*/
-
     void CodeGenCatapultC::VisitExpr_(const StreamExpr *op, std::ostream &os)
     {
       std::string vid = GetVarID(op->buffer_var.get());
@@ -702,15 +514,7 @@ namespace TVM
     {
       std::string vid = GetVarID(op->buffer_var.get());
       PrintIndent();
-      // remove StreamType::ATTR??
-      // if (op->stream_type == StreamType::ATTR)
-      // {
-      //   stream << "#pragma HLS stream variable=" << vid << " depth=" << op->depth << "\n";
-      // }
-      // else
-      {
-        stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
-      }
+      stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
     }
 
     class AllocateCollector final : public IRVisitor
@@ -746,6 +550,10 @@ namespace TVM
       std::ostringstream head_decl_stream;
       std::string func_name = op->name;
       
+      decl_stream << "#include <ac_int.h>\n";
+      decl_stream << "#include <ac_float.h>\n";
+      decl_stream << "#include <ac_channel.h>\n";
+      decl_stream << "#include <mc_scverify.h>\n";
       decl_stream << "#include <" << op->name << ".h>\n\n";
       stream.str("");
       stream.clear();
@@ -838,10 +646,10 @@ namespace TVM
             {
               auto bits = type.bits();
               stream << "ac_channel< "
-                     << "ac_int<" << bits << ", true> > " << vid;
+                     << "ac_int<" << bits << ", true> > &" << vid;
               
               head_stream << "ac_channel< "
-                     << "ac_int<" << bits << ", true> > " << vid;
+                     << "ac_int<" << bits << ", true> > &" << vid;
             }
             else // memory-mapped pointers
             {

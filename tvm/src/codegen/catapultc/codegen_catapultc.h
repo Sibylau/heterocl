@@ -33,18 +33,18 @@ namespace TVM
       void VisitExpr_(const GetSlice *op, std::ostream &os) override;
       void VisitExpr_(const StreamExpr *op, std::ostream &os) override;
       void VisitExpr_(const Call *op, std::ostream &os) override;
-      // void VisitExpr_(const Load *op, std::ostream& os) override;
       void VisitExpr_(const Cast *op, std::ostream &os);
+      // not overriding Load node
 
       void VisitStmt_(const Allocate *op) override;
       void VisitStmt_(const Store *op) override;
       void VisitStmt_(const For *op) override;
-      // void VisitStmt_(const Partition* op) override;
       // void VisitStmt_(const Stencil* op) override;
       void VisitStmt_(const StreamStmt *op) override;
       void VisitStmt_(const KernelDef *op) override;
       void VisitStmt_(const KernelStmt *op) override;
       void VisitStmt_(const ExternModule *op) override;
+      // not overriding Partition node
 
       void GenForStmt(const For *op, std::string pragma, bool before);
 

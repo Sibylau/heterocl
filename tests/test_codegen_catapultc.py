@@ -14,26 +14,6 @@ def test_array_add_const():
     print(code)
 
 
-# def test_scalar_add():
-#   hcl.init()
-#   a = hcl.placeholder((1, ), "a")
-#   b = hcl.placeholder((1, ), "b")
-#   c = hcl.placeholder((10, ), "c")
-
-#   def simple_add(a, b, c):
-#       c[0] = a[0] + b[0]
-
-#   s = hcl.create_schedule([a, b, c], simple_add)
-#   print(hcl.lower(s))
-
-#   target = hcl.platform.aws_f1
-#   s.to([a, b], target.xcel)
-#   s.to(c, target.host)
-
-#   f = hcl.build(s, target='systemc')
-#   print(f)
-
-
 def test_asic_target():
     hcl.init()
     A = hcl.placeholder((5, 5), "A")
@@ -79,24 +59,6 @@ def test_asic_target():
     # print(np_A)
     # print(np_B)
     # print(np_C)
-
-
-def test_fpga_stream():
-    hcl.init()
-    A = hcl.placeholder((10, 32), "A")
-
-    def kernel(A):
-        B = hcl.compute(A.shape, lambda *args: A[args] + 1, "B")
-        C = hcl.compute(A.shape, lambda *args: B[args] + 1, "C")
-        D = hcl.compute(A.shape, lambda *args: C[args] * 2, "D")
-        return D
-
-    target = hcl.platform.aws_f1
-    s = hcl.create_schedule([A], kernel)
-    s.to(kernel.B, target.xcel)
-    s.to(kernel.C, target.host)
-    code = str(hcl.lower(s))
-    print(code)
 
 
 def test_vitis():
@@ -287,6 +249,31 @@ def test_slice():
     test_set_slice()
     test_get_slice()
 
+def test_stream():
+    hcl.init()
+    A = hcl.placeholder((10, 32), "A")
+    B = hcl.placeholder((10, 32), "B")
+
+    def kernel(A, B):
+        C = hcl.compute(A.shape, lambda i, j: A[i, j] + B[i, j], "C")
+        D = hcl.compute(C.shape, lambda i, j: C[i, j] + 1, "D")
+        return D
+
+    # target = hcl.platform.aws_f1
+    # target.config(compile="vitis", mode="debug")
+    # s = hcl.create_schedule([A, B], kernel)
+    config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
+    target = hcl.platform.custom(config)
+    s = hcl.create_schedule([A, B], kernel)
+    target.config(compile="catapultc", mode="debug", backend="catapultc")
+
+    s.to(A, target.xcel, mode=hcl.IO.Stream)
+    s.to(B, target.xcel, mode=hcl.IO.Stream)
+    s.to(kernel.D, target.host, mode=hcl.IO.Stream)
+    code = hcl.build(s, target)
+
+    print(code)
+
 
 def test_binary_conv():
     hcl.init()
@@ -316,94 +303,14 @@ def test_binary_conv():
     print(code)
 
 
-def test_custom_target():
-    hcl.init()
-    A = hcl.placeholder((10, 32), "A")
-    B = hcl.placeholder((10, 32), "B")
-
-    def kernel(A, B):
-        C = hcl.compute(A.shape, lambda i, j: A[i, j] + B[i, j], "C")
-        D = hcl.compute(C.shape, lambda i, j: C[i, j] + 1, "D")
-        return D
-
-    config = {
-        "host": hcl.dev.cpu("intel", "e5"),
-        "xcel": [hcl.dev.fpga("xilinx", "xcvu19p")]
-    }
-
-    p = hcl.platform.custom(config)
-    s = hcl.create_schedule([A, B], kernel)
-    s.to(A, p.xcel.HBM[0])
-    s.to(B, p.xcel.HBM[1])
-    s.to(kernel.D, p.host)
-    p.config(compile="vitis", mode="debug", backend="vhls")
-    code = hcl.build(s, p)
-    print(code)
-    assert "MAX_HBM_BANKCOUNT" in code
-
-
-def test_stream():
-    hcl.init()
-    A = hcl.placeholder((10, 32), "A")
-    B = hcl.placeholder((10, 32), "B")
-
-    def kernel(A, B):
-        C = hcl.compute(A.shape, lambda i, j: A[i, j] + B[i, j], "C")
-        D = hcl.compute(C.shape, lambda i, j: C[i, j] + 1, "D")
-        return D
-
-    # target = hcl.platform.aws_f1
-    # target.config(compile="vitis", mode="debug")
-    # s = hcl.create_schedule([A, B], kernel)
-    config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
-    target = hcl.platform.custom(config)
-    s = hcl.create_schedule([A, B], kernel)
-    target.config(compile="catapultc", mode="debug", backend="catapultc")
-
-    s.to(A, target.xcel, mode=hcl.IO.Stream)
-    s.to(B, target.xcel, mode=hcl.IO.Stream)
-    s.to(kernel.D, target.host, mode=hcl.IO.Stream)
-    code = hcl.build(s, target)
-
-    print(code)
-
-
-def test_stream_fpga():
-    hcl.init()
-    A = hcl.placeholder((10, 32), "A")
-    B = hcl.placeholder((10, 32), "B")
-
-    def kernel(A, B):
-        C = hcl.compute(A.shape, lambda i, j: A[i, j] + B[i, j], "C")
-        D = hcl.compute(C.shape, lambda i, j: C[i, j] + 1, "D")
-        return D
-
-    target = hcl.platform.aws_f1
-    target.config(compile="vitis", mode="debug")
-    s = hcl.create_schedule([A, B], kernel)
-    # config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
-    # target = hcl.platform.custom(config)
-    # s = hcl.create_schedule([A, B], kernel)
-    # target.config(compile="catapultc", mode="debug", backend="catapultc")
-
-    s.to(A, target.xcel, mode=hcl.IO.Stream)
-    s.to(B, target.xcel, mode=hcl.IO.Stream)
-    s.to(kernel.D, target.host, mode=hcl.IO.Stream)
-    code = hcl.build(s, target)
-
-    print(code)
 
 
 if __name__ == '__main__':
-    # test_array_add_const()
-    # test_arithmetic()
-    # test_pragma()
-    # test_asic_target()
-    # test_vitis()
-    # test_slice()
-    # test_redundancy()
-    # test_fpga_stream()
-    # test_custom_target()
+    test_array_add_const()
+    test_asic_target()
+    test_arithmetic()
+    test_pragma()
+    test_slice()
     test_stream()
-    # test_stream_fpga()
-    # test_binary_conv()
+    test_binary_conv()
+    
