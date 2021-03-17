@@ -1,6 +1,28 @@
 import heterocl as hcl
 import numpy as np
 
+# legacy flow
+def test_runtime_basic(): 
+    hcl.init()
+    A = hcl.placeholder((10, ), "A")
+    B = hcl.compute(A.shape, lambda x: A[x] + 1, "B")
+
+    # print(hcl.lower(s))
+
+    config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
+    target = hcl.platform.custom(config)
+    s = hcl.create_schedule([A, B])
+    s.to(A, target.xcel, mode=hcl.IO.DMA)
+    s.to(B, target.host, mode=hcl.IO.DMA) 
+    target.config(compile="catapultc", mode="sw_sim", backend="catapultc")
+    f = hcl.build(s, target)
+    
+    np_A = np.random.randint(10, size = A.shape)
+    np_B = np.zeros(A.shape)
+    hcl_A = hcl.asarray(np_A)
+    hcl_B = hcl.asarray(np_B)
+    f(hcl_A, hcl_B)
+
 
 def test_array_add_const():
     hcl.init()
@@ -306,11 +328,12 @@ def test_binary_conv():
 
 
 if __name__ == '__main__':
-    test_array_add_const()
-    test_asic_target()
-    test_arithmetic()
-    test_pragma()
-    test_slice()
-    test_stream()
-    test_binary_conv()
+    test_runtime_basic()
+    # test_array_add_const()
+    # test_asic_target()
+    # test_arithmetic()
+    # test_pragma()
+    # test_slice()
+    # test_stream()
+    # test_binary_conv()
     

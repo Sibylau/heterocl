@@ -24,6 +24,7 @@ namespace TVM
       void AddFunction(LoweredFunc f, str2tupleMap<std::string, Type> map_arg_type);
       std::string Finish();
       std::string GetDevice();
+      std::string GetTop();
 
       void PrintType(Type t, std::ostream &os) override;
 

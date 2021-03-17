@@ -36,10 +36,9 @@ class CodeGenCatapultCTB final : public CodeGenHLSC {
   void VisitStmt_(const Store* op) override;
   void VisitStmt_(const For* op) override;
   // void VisitStmt_(const Partition* op) override;
-  // void VisitStmt_(const Stencil* op) override;
   void VisitStmt_(const StreamStmt* op) override;
-  // void VisitStmt_(const KernelDef* op) override;
-  // void VisitStmt_(const KernelStmt* op) override;
+  void VisitStmt_(const KernelDef* op) override;
+  void VisitStmt_(const KernelStmt* op) override;
   void VisitStmt_(const ExternModule* op) override;
 
   void GenForStmt(const For* op, std::string pragma, bool before);

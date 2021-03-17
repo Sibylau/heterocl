@@ -64,7 +64,7 @@ void GenHostCode(TVMArgs& args,
                  const std::vector<TVMType>& arg_types,
                  LoweredFunc func,
                  std::string platform,
-                 std::string host_code,
+                 std::string host_code, std::string top_code,
                  std::vector<std::string> arg_names,
                  bool kernel_is_empty,
                  std::string project);

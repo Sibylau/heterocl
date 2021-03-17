@@ -33,12 +33,6 @@ struct argInfo {
 
 void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
-  // write header files
-  decl_stream << "#include <" << f->name << ".h>\n";
-  decl_stream << "#include <iostream.h>\n";
-  decl_stream << "#include <mc_scverify.h>\n\n";
-
-  decl_stream << "using namespace std;\n\n";
 
   // clear previous generated state.
   this->InitFuncState(f);
@@ -48,7 +42,7 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
 
-  stream << "CCS_MAIN(int argv, char **argc) {\n";
+  // stream << "CCS_MAIN(int argv, char **argc) {\n";
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     std::string vid = AllocVarID(v.get());
@@ -61,7 +55,7 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
       const BufferNode* buf = f->api_args[i].as<BufferNode>();
       if (v.type().is_handle() && buf) {
         var_shape_map_[buf->data.get()] = buf->shape;
-        auto it = alloc_storage_scope_.find(v.get());
+        // auto it = alloc_storage_scope_.find(v.get());
       }
     }
   }
@@ -71,16 +65,16 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
-  stream << "CCS_DESIGN(" << f->name << ") (";
-  for (size_t i = 0; i < f->args.size(); ++i) {
-    Var v = f->args[i];
-    std::string vid = GetVarID(v.get());
-    auto arg = map_arg_type[vid];
-    if (i != 0) stream << ", ";
-    stream << std::get<0>(arg);
-  }
-  stream << ");\n\n";
-  stream << "CCS_RETURN(0);\n" << "}\n\n";
+  // stream << "CCS_DESIGN(" << f->name << ") (";
+  // for (size_t i = 0; i < f->args.size(); ++i) {
+  //   Var v = f->args[i];
+  //   std::string vid = GetVarID(v.get());
+  //   auto arg = map_arg_type[vid];
+  //   if (i != 0) stream << ", ";
+  //   stream << std::get<0>(arg);
+  // }
+  // stream << ");\n\n";
+  // stream << "CCS_RETURN(0);\n" << "}\n\n";
 }
 
 std::string CodeGenCatapultCTB::GetHost() {
@@ -510,29 +504,6 @@ void CodeGenCatapultCTB::GenForStmt(const For* op, std::string pragma, bool befo
 }
 
 
-/*void CodeGenCatapultCTB::VisitStmt_(const Partition* op) {
-  PrintIndent();
-  stream << "#pragma HLS array_partition variable=";
-  std::string vid = GetVarID(op->buffer_var.get());
-  stream << vid << " ";
-  switch (op->partition_type) {
-    case PartitionType::Complete:
-      stream << "complete";
-      break;
-    case PartitionType::Block:
-      stream << "block";
-      break;
-    case PartitionType::Cyclic:
-      stream << "cyclic";
-      break;
-  }
-  stream << " dim=" << op->dim;
-  if (op->partition_type != PartitionType::Complete) {
-    stream << " factor=" << op->factor;
-  }
-  stream << "\n";
-}*/
-
 void CodeGenCatapultCTB::VisitExpr_(const StreamExpr* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
   os << vid << ".read()";
@@ -575,10 +546,14 @@ class AllocateCollector final : public IRVisitor {
     VarExprUnorderedSet& outputs_;
 };
 
-/*void CodeGenCatapultCTB::VisitStmt_(const KernelStmt *op) {
-  PrintIndent();
-  stream << op->name << "(";
+void CodeGenCatapultCTB::VisitStmt_(const KernelStmt *op) {
+  // write header files
+  decl_stream << "#include \"" << op->name << ".h\"\n";
+  decl_stream << "#include <mc_scverify.h>\n\n";
+  stream.str("");
+  stream.clear();
 
+  stream << "CCS_DESIGN(" << op->name << ") (";
   // Extract annotation values
   std::vector<argInfo> args_info;
   for (size_t k = 0; k < op->annotate_keys.size(); k++) {
@@ -591,19 +566,13 @@ class AllocateCollector final : public IRVisitor {
     if (i < op->args.size() - 1) stream << ", ";
   }
   stream << ");\n";
-}*/
+}
 
-/*void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
+void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
   LoweredFunc f;
   // save func states
   CodeGenC::SaveFuncState(f);
   CodeGenC::InitFuncState(f);
-  std::ostringstream save;
-  save << stream.str();
-  save << "visiting kerneldef\n";
-  stream << save.str();
-  stream.str("");
-  stream.clear();
 
   // skip the first underscore
   GetUniqueName("_");
@@ -644,107 +613,44 @@ class AllocateCollector final : public IRVisitor {
 
   // print top-level kernel function
   if (is_kernel_func) {
+    // stream << "CCS_DESIGN(" << op->name << ") (";
+    // for (size_t i = 0; i < op->args.size(); ++i) {
+    //   VarExpr v = op->args[i];
+    //   var_shape_map_[v.get()] = op->arg_shapes[i];
+    //   std::string vid = AllocVarID(v.get());
 
-    int extern_scope = -1;
-    if (extern_mode) {
-      extern_scope  = BeginScope();
-      stream << "extern \"C\" {\n";
-    }
+    //   // if (i != 0) stream << ", ";
+    //   // std::string str = PrintExpr(op->arg_types[i]);
+    //   // Type type = String2Type(str);
 
-    stream << "void " << op->name << "(";
-    for (size_t i = 0; i < op->args.size(); ++i) {
-      VarExpr v = op->args[i];
-      var_shape_map_[v.get()] = op->arg_shapes[i];
-      std::string vid = AllocVarID(v.get());
+    //   // pass-by-value arguments
+    //   if (var_shape_map_[v.get()].size() == 1 &&
+    //       var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
+    //     // PrintType(type, stream);
+    //     stream << " " << vid;
 
-      if (i != 0) stream << ", ";
-      std::string str = PrintExpr(op->arg_types[i]);
-      Type type = String2Type(str);
+    //   // pass-by-pointer arguments
+    //   } else {
+    //     // CHECK(args_info.size() > i) << i << ":" << args_info.size();
+    //     // auto info = args_info[i];
 
-      // pass-by-value arguments
-      if (var_shape_map_[v.get()].size() == 1 &&
-          var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
-        PrintType(type, stream);
-        stream << " " << vid;
-
-      // pass-by-pointer arguments
-      } else {
-        CHECK(args_info.size() > i) << i << ":" << args_info.size();
-        auto info = args_info[i];
-
-        if (info.stream_type == StreamType::FIFO) {
-          auto bits = type.bits();
-          if (decl_stream.str().find("typedef qdma_axis<" + 
-                  std::to_string(bits)) == std::string::npos) {
-            decl_stream << "typedef qdma_axis<" << bits 
-                        << ", 0, 0, 0> pkt_b" << bits << ";\n";
-          }
-          stream << "hls::stream<pkt_b" << bits << "> &" << vid;
-
-        // Memory-mapped pointers
-        } else {
-          PrintType(type, stream);
-          auto size = var_shape_map_[v.get()];
-          stream << " " << vid;
-          for (auto& s : size) {
-            stream << "[" << s << "]";
-          }
-        }
-      }
-    }
-    stream << ") {\n";
-
-    if (extern_mode) {
-      // Port-level protocol interface
-      CHECK(op->args.size() == op->args.size());
-      for (size_t i = 0; i < op->args.size(); i++) {
-        if (op->arg_shapes[i].size() == 1 &&
-            op->arg_shapes[i][0].as<IntImm>()->value == 1) {
-          continue;
-        } else {
-          PrintIndent();
-          auto info = args_info[i];
-
-          if (info.stream_type == StreamType::FIFO) {
-            stream << "#pragma HLS INTERFACE axis port="
-                   << info.name << "\n";
-          } else {
-            stream << "#pragma HLS INTERFACE m_axi port="
-                   << info.name << " "
-                   << "offset=slave bundle=gmem" << info.mem_port << "\n";
-          }
-        }
-      }
-
-      // Block-level control interface 
-      for (size_t i = 0; i < op->args.size(); i++) {
-        auto info = args_info[i];
-        if (info.stream_type == StreamType::FIFO) continue;
-        PrintIndent();
-        stream << "#pragma HLS INTERFACE s_axilite port="
-               << info.name << " "
-               << "bundle=control\n";
-      }
-      PrintIndent();
-      stream << "#pragma HLS INTERFACE s_axilite"
-             << " port=return bundle=control\n";
-    }
+    //     stream << " " << vid;
+    //   }
+    // }
+    // stream << ");";
 
     // function body
     int func_scope = BeginScope();
     range_ = CollectIterRange(op->body);
-    PrintStmt(op->body);
+    // PrintStmt(op->body);
 
     EndScope(func_scope);
-    PrintIndent();
-    stream << "}\n";
+    // PrintIndent();
+    // stream << "}\n";
 
-    if (extern_mode) {
-        stream << "}\n\n";
-        EndScope(extern_scope);
-    }
 
   // Non-top kernel function 
+  // needs to figure out - hierarchical design?
   } else {
 
     auto const_size = [&](Array<Expr> shape) -> int32_t {
@@ -815,87 +721,12 @@ class AllocateCollector final : public IRVisitor {
 
   // restore default stream
   module_stream << stream.str();
-  stream.str("");
-  stream.clear();
-  stream << save.str();
+  // stream.str("");
+  // stream.clear();
+  // stream << save.str();
   RestoreFuncState(f);
-}*/
+}
 
-/*void CodeGenCatapultCTB::VisitStmt_(const Stencil* op) {
-  // Use SODA codegen for stencil analysis
-  CodeGenSODA cg_soda;
-  cg_soda.Init(false);
-  VarExprUnorderedSet inputs;
-  VarExprUnorderedSet outputs;
-  for (size_t i = 0; i < op->inputs.size(); i++)
-    inputs.insert(op->inputs[i]);
-  for (size_t i = 0; i < op->outputs.size(); i++) {
-    outputs.insert(op->outputs[i]);
-  }
-  std::vector<const Allocate*> alloc_list;
-  AllocateCollector collector(alloc_list, outputs);
-  collector.Visit(op->body);
-  std::string kernel_name;
-  cg_soda.PrintSODA(op, &kernel_name);
-  std::string code = cg_soda.Finish();
-
-  // Generate SODA HLSC code
-  SODA2HLSC(code);
-
-  PrintIndent();
-  // Create a new file for the stencil function if not exists
-  if (!soda_header_.is_open()) {
-    soda_header_.open("soda_stencil.h");
-    stream << "#include \"soda_stencil.h\"\n";
-  }
-  // Allocate output tensors if needed
-  for (size_t i = 0; i < alloc_list.size(); i++) {
-    auto alloc = alloc_list[i];
-    PrintIndent();
-    PrintType(alloc->type, stream);
-    std::string vid = AllocVarID(alloc->buffer_var.get());
-    stream << ' ' << vid;
-    const Variable* buffer = alloc->buffer_var.as<Variable>();
-    var_shape_map_[buffer] = alloc->extents;
-    for (size_t j = 0; j < alloc->extents.size(); j++) {
-      stream << '[';
-      PrintExpr(alloc->extents[j], stream);
-      stream << ']';
-    }
-    stream << ";\n";
-  }
-  // Print the function call to SODA function
-  PrintIndent();
-  soda_header_ << "void " + kernel_name + "(";
-  stream << kernel_name + "(";
-  for (size_t i = 0; i < op->inputs.size(); i++) {
-    PrintType(cg_soda.var_type_map_[op->inputs[i].get()], soda_header_);
-    soda_header_ << "* ";
-    PrintExpr(op->inputs[i], soda_header_);
-    PrintExpr(op->inputs[i], stream);
-    soda_header_ << ", ";
-    stream << ", ";
-  }
-  for (size_t i = 0; i < op->outputs.size(); i++) {
-    PrintType(cg_soda.var_type_map_[op->outputs[i].get()], soda_header_);
-    soda_header_ << "* ";
-    PrintExpr(op->outputs[i], soda_header_);
-    PrintExpr(op->outputs[i], stream);
-    if (i < op->outputs.size()-1) {
-      soda_header_ << ", ";
-      stream << ", ";
-    }
-  }
-  soda_header_ << ");\n";
-  stream << ");\n";
-
-  // Generate SODA HLSC code
-  std::ofstream soda_file;
-  soda_file.open(kernel_name+".cpp");
-  soda_file << "#include \"soda_stencil.h\"\n";
-  soda_file << code;
-  soda_file.close();
-}*/
 
 }  // namespace codegen
 }  // namespace TVM

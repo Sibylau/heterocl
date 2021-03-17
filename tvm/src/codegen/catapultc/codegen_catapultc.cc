@@ -45,31 +45,24 @@ namespace TVM
       for (const auto &kv : f->handle_data_type)
         RegisterHandleType(kv.first.get(), kv.second.type());
 
-      for (size_t i = 0; i < f->args.size(); ++i)
-      {
+      for (size_t i = 0; i < f->args.size(); ++i) {
         Var v = f->args[i];
         std::string vid = AllocVarID(v.get());
 
         // check type in the arg map
         if (map_arg_type.find(vid) == map_arg_type.end())
-        {
           LOG(WARNING) << vid << " type not found\n";
-        }
-        else
-        {
+        else {
           auto arg = map_arg_type[vid];
           const BufferNode *buf = f->api_args[i].as<BufferNode>();
           if (v.type().is_handle() && buf)
-          {
             var_shape_map_[buf->data.get()] = buf->shape;
-            // auto it = alloc_storage_scope_.find(v.get());
-          }
         }
       }
 
       // transform lower case function name to upper case
-      std::string func_name = f->name;
-      std::transform(func_name.begin(), func_name.end(), func_name.begin(), ::toupper);
+      // std::string func_name = f->name;
+      // std::transform(func_name.begin(), func_name.end(), func_name.begin(), ::toupper);
 
       int func_scope = this->BeginScope();
       range_ = CollectIterRange(f->body);
@@ -90,6 +83,11 @@ namespace TVM
       return decl_stream.str() +
              module_stream.str() +
              stream.str();
+    }
+
+    std::string CodeGenCatapultC::GetTop()
+    {
+      return head_stream.str();
     }
 
     void CodeGenCatapultC::PrintType(Type t, std::ostream &os)
@@ -540,8 +538,7 @@ namespace TVM
       // print nothing
     }
 
-    void CodeGenCatapultC::VisitStmt_(const KernelDef *op)
-    {
+    void CodeGenCatapultC::VisitStmt_(const KernelDef *op) {
       LoweredFunc f;
       // save func states
       CodeGenC::SaveFuncState(f);
@@ -554,7 +551,7 @@ namespace TVM
       decl_stream << "#include <ac_float.h>\n";
       decl_stream << "#include <ac_channel.h>\n";
       decl_stream << "#include <mc_scverify.h>\n";
-      decl_stream << "#include <" << op->name << ".h>\n\n";
+      decl_stream << "#include \"" << op->name << ".h\"\n\n";
       stream.str("");
       stream.clear();
 
