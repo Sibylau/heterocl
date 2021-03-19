@@ -40,10 +40,11 @@ class ArgDirectionInference : public ir::IRVisitor {
   public: 
     std::set<std::string> write_var_list;
     // std::set<std::string> read_var_list;
+    explicit ArgDirectionInference() {}
 
     void Visit_(const Store* op) {
       std::string var_name = op->buffer_var.get()->name_hint;
-      LOG(INFO) << "store node var name: " << var_name << "\n";
+      // LOG(INFO) << "store node var name: " << var_name << "\n";
       write_var_list.insert(var_name);
       IRVisitor::Visit_(op);
     }
@@ -57,18 +58,36 @@ class ArgDirectionInference : public ir::IRVisitor {
 
     void Visit_(const StreamStmt* op) {
       std::string var_name = op->buffer_var.get()->name_hint;
-      LOG(INFO) << "Streamstmt node var name: " << var_name << "\n";
+      // LOG(INFO) << "Streamstmt node var name: " << var_name << "\n";
       write_var_list.insert(var_name);
+      // this->printset();
       IRVisitor::Visit_(op);
     }
 
-    bool is_write(std::string var) {
-      if (write_var_list.find(var) != write_var_list.end())
+    // void Visit_(const StreamExpr* op) {
+    //   std::string var_name = op->buffer_var.get()->name_hint;
+    //   LOG(INFO) << "StreamExpr node var name: " << var_name << "\n";
+    //   write_var_list.insert(var_name);
+    //   IRVisitor::Visit_(op);
+    // }
+
+    bool is_written(std::string var) {
+      if (write_var_list.count(var) != 0)
         return true;
       else 
         return false;
     }
+    
+    void printset() {
+      LOG(INFO) << "write_var_list:\n";
+      for (auto &it: write_var_list) {
+        LOG(INFO) << it << "  ";
+      }
+    }
 };
+
+ArgDirectionInference arg_inference;
+
 
 void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
         str2tupleMap<std::string, Type> map_arg_type) {
@@ -81,7 +100,6 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
     RegisterHandleType(kv.first.get(), kv.second.type());
   }
 
-  // stream << "CCS_MAIN(int argv, char **argc) {\n";
   for (size_t i = 0; i < f->args.size(); ++i) {
     Var v = f->args[i];
     std::string vid = AllocVarID(v.get());
@@ -94,22 +112,8 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
       const BufferNode* buf = f->api_args[i].as<BufferNode>();
       if (v.type().is_handle() && buf) {
         var_shape_map_[buf->data.get()] = buf->shape;
-        // auto it = alloc_storage_scope_.find(v.get());
       }
     }
-  }
-
-  ArgDirectionInference arg_inference;
-  arg_inference.Visit(f->body);
-  LOG(INFO) << "Does IRVisitor visits Store or Load?\n";
-  for (size_t i = 0; i < f->args.size(); ++i) {
-    Var v = f->args[i];
-    std::string vid = GetVarID(v.get());
-    // check type in the arg map
-    if (arg_inference.is_write(vid))
-      is_arg_written.insert(std::pair<std::string, bool>(vid, true));
-    else
-      is_arg_written.insert(std::pair<std::string, bool>(vid, false));
   }
 
   int func_scope = this->BeginScope();
@@ -179,7 +183,7 @@ void CodeGenCatapultCTB::VisitExpr_(const GetSlice* op, std::ostream& os) {
 void CodeGenCatapultCTB::VisitExpr_(const Load* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
   // TODO: find a betetr way to track streaming channels 
-  LOG(INFO) << "calling load, " << vid << "\n";
+  // LOG(INFO) << "calling load, " << vid << "\n";
   if (stream_vars.find(vid) != stream_vars.end()) {
     PrintIndent(); 
     stream << vid << "_temp = " << vid << ".read();\n";
@@ -203,7 +207,7 @@ void CodeGenCatapultCTB::VisitExpr_(const Load* op, std::ostream& os) {
 void CodeGenCatapultCTB::VisitStmt_(const Store* op) {
   // where does stream_vars get updated?
   std::string vid = GetVarID(op->buffer_var.get());
-  LOG(INFO) << "visiting store, " << vid << "\n";
+  // LOG(INFO) << "visiting store, " << vid << "\n";
   if (stream_vars.find(vid) != stream_vars.end()) {
     // PrintIndent(); 
     // auto bits = handle_data_type_[op->buffer_var.get()].bits();
@@ -587,7 +591,7 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
   stream.str("");
   stream.clear();
 
-  
+  arg_inference.Visit(op->body);
   // print top-level kernel function
   if (is_kernel_func) {
     // std::list<std::string> var_list;
@@ -614,7 +618,7 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
 
       // is_arg_written = arg_direct.Analyze(op->body);
       // CHECK(is_arg_written.count(vid)) << vid;
-      bool is_vid_written = is_arg_written[vid];
+      // bool is_vid_written = is_arg_written[vid];
       // bool is_vid_written = arg_direct.is_write(vid);
       // LOG(INFO) << "map empty? " << is_arg_written.empty() << "\n";
       // for (auto it : is_arg_written) {
@@ -631,7 +635,7 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
         stream << "static ac_channel< "
                 << "ac_int<" << bits << ", true> > " << vid << "_;\n";
         
-        if (!is_vid_written) {
+        if (!arg_inference.is_written(vid)) {
           int idx = 0;
           for (auto &s: shape) {
             stream << "for (unsigned int i" << idx << " = 0; i" << idx << " < " << s << "; i"
@@ -673,12 +677,13 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
       auto info = args_info[i];
       auto shape = op->arg_shapes[i];
       // bool is_vid_written = false;
-      bool is_vid_written = is_arg_written[vid];
+      // bool is_vid_written = is_arg_written[vid];
       // bool is_vid_written = arg_direct.is_write(vid);
       // if (is_arg_written.at(vid)) {
       //   is_vid_written = is_arg_written[vid];
       // }
-      if (info.stream_type == StreamType::FIFO && is_vid_written) {
+      // LOG(INFO) << vid << ", is_written? " << arg_inference.is_written(vid) << "\n";
+      if (info.stream_type == StreamType::FIFO && arg_inference.is_written(vid)) {
         int idx = 0;
         for (auto &s: shape) {
           stream << "for (unsigned int i" << idx << " = 0; i" << idx << " < " << s << 
@@ -700,7 +705,7 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
     // function body
     int func_scope = BeginScope();
     range_ = CollectIterRange(op->body);
-    VisitStmt(op->body); // issue
+    // VisitStmt(op->body); // issue
 
     EndScope(func_scope);
     // PrintIndent();

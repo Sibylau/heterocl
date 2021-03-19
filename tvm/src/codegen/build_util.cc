@@ -619,8 +619,12 @@ std::string SplitHostCode(std::string platform, std::string host_code,
   std::string& include) {
   std::string return_main_body;
   if (platform == "catapultc") {
-    include = host_code.substr(0, host_code.find("CCS"));
-    return_main_body = host_code.substr(host_code.find("CCS"));
+    std::string key = "#include"; // find the last occurance of '#include' as the ending of header
+    std::size_t found = host_code.rfind(key);
+    std::size_t split_point = host_code.find("\n", found);
+    split_point = host_code.find("\n", split_point); // after two newlines
+    include = host_code.substr(0, split_point);
+    return_main_body = host_code.substr(split_point);
   } else {
     size_t pos = host_code.find("default_function");
     include = host_code.substr(0, host_code.rfind("void", pos));
