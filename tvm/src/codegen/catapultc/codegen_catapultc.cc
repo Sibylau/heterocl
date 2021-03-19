@@ -150,17 +150,18 @@ namespace TVM
     {
       // where does stream_vars get updated?
       std::string vid = GetVarID(op->buffer_var.get());
+      LOG(INFO) << "Visit store node, " << vid << "\n";
       if (stream_vars.find(vid) != stream_vars.end())
       {
-        PrintIndent();
-        auto bits = handle_data_type_[op->buffer_var.get()].bits();
-        stream << "pkt_b" << bits << " " << vid << "_temp;\n";
-        PrintIndent();
-        stream << vid << "_temp.set_data(" << PrintExpr(op->value) << ");\n";
-        PrintIndent();
-        stream << vid << "_temp.set_keep(-1);\n";
-        PrintIndent();
-        stream << vid << ".write(" << vid << "_temp);\n";
+        // PrintIndent();
+        // auto bits = handle_data_type_[op->buffer_var.get()].bits();
+        // stream << "pkt_b" << bits << " " << vid << "_temp;\n";
+        // PrintIndent();
+        // stream << vid << "_temp.set_data(" << PrintExpr(op->value) << ");\n";
+        // PrintIndent();
+        // stream << vid << "_temp.set_keep(-1);\n";
+        // PrintIndent();
+        // stream << vid << ".write(" << vid << "_temp);\n";
         return;
       }
 
@@ -493,6 +494,7 @@ namespace TVM
     void CodeGenCatapultC::VisitExpr_(const StreamExpr *op, std::ostream &os)
     {
       std::string vid = GetVarID(op->buffer_var.get());
+      LOG(INFO) << "visit StreamExpr node, " << vid <<"\n";
       os << vid << ".read()";
     }
 
@@ -512,6 +514,7 @@ namespace TVM
     {
       std::string vid = GetVarID(op->buffer_var.get());
       PrintIndent();
+      LOG(INFO) << "Visit StreamStmt node, " << vid << "\n";
       stream << vid << ".write(" << PrintExpr(op->value) << ");\n";
     }
 
@@ -751,8 +754,8 @@ namespace TVM
       }
 
       head_stream << ");\n\n" << "#endif\n";
-      LOG(INFO) << "head_stream: \n"
-                << head_stream.str() << "\n";
+      // LOG(INFO) << "head_stream: \n"
+      //           << head_stream.str() << "\n";
       RestoreFuncState(f);
     }
 

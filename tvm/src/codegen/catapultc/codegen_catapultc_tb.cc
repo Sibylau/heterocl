@@ -22,6 +22,10 @@
 namespace TVM {
 namespace codegen {
 
+using std::string;
+using std::set;
+using std::unordered_map;
+
 struct argInfo {
   std::string     name;
   StorageType     mem_type;
@@ -29,6 +33,41 @@ struct argInfo {
   StreamType      stream_type;
   int             channel_depth;
   bool            is_written;
+};
+
+unordered_map<string, bool> is_arg_written;
+class ArgDirectionInference : public ir::IRVisitor {
+  public: 
+    std::set<std::string> write_var_list;
+    // std::set<std::string> read_var_list;
+
+    void Visit_(const Store* op) {
+      std::string var_name = op->buffer_var.get()->name_hint;
+      LOG(INFO) << "store node var name: " << var_name << "\n";
+      write_var_list.insert(var_name);
+      IRVisitor::Visit_(op);
+    }
+
+    // void Visit_(const Load* op) {
+    //   std::string var_name = op->buffer_var.get()->name_hint;
+    //   LOG(INFO) << "Load node var name: " << var_name << "\n";
+    //   read_var_list.insert(var_name);
+    //   IRVisitor::Visit_(op);
+    // }
+
+    void Visit_(const StreamStmt* op) {
+      std::string var_name = op->buffer_var.get()->name_hint;
+      LOG(INFO) << "Streamstmt node var name: " << var_name << "\n";
+      write_var_list.insert(var_name);
+      IRVisitor::Visit_(op);
+    }
+
+    bool is_write(std::string var) {
+      if (write_var_list.find(var) != write_var_list.end())
+        return true;
+      else 
+        return false;
+    }
 };
 
 void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
@@ -60,21 +99,24 @@ void CodeGenCatapultCTB::AddFunction(LoweredFunc f,
     }
   }
 
+  ArgDirectionInference arg_inference;
+  arg_inference.Visit(f->body);
+  LOG(INFO) << "Does IRVisitor visits Store or Load?\n";
+  for (size_t i = 0; i < f->args.size(); ++i) {
+    Var v = f->args[i];
+    std::string vid = GetVarID(v.get());
+    // check type in the arg map
+    if (arg_inference.is_write(vid))
+      is_arg_written.insert(std::pair<std::string, bool>(vid, true));
+    else
+      is_arg_written.insert(std::pair<std::string, bool>(vid, false));
+  }
+
   int func_scope = this->BeginScope();
   range_ = CollectIterRange(f->body);
   this->PrintStmt(f->body);
   this->EndScope(func_scope);
   this->PrintIndent();
-  // stream << "CCS_DESIGN(" << f->name << ") (";
-  // for (size_t i = 0; i < f->args.size(); ++i) {
-  //   Var v = f->args[i];
-  //   std::string vid = GetVarID(v.get());
-  //   auto arg = map_arg_type[vid];
-  //   if (i != 0) stream << ", ";
-  //   stream << std::get<0>(arg);
-  // }
-  // stream << ");\n\n";
-  // stream << "CCS_RETURN(0);\n" << "}\n\n";
 }
 
 std::string CodeGenCatapultCTB::GetHost() {
@@ -137,7 +179,7 @@ void CodeGenCatapultCTB::VisitExpr_(const GetSlice* op, std::ostream& os) {
 void CodeGenCatapultCTB::VisitExpr_(const Load* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
   // TODO: find a betetr way to track streaming channels 
-  // LOG(INFO) << "calling load\n";
+  LOG(INFO) << "calling load, " << vid << "\n";
   if (stream_vars.find(vid) != stream_vars.end()) {
     PrintIndent(); 
     stream << vid << "_temp = " << vid << ".read();\n";
@@ -159,19 +201,19 @@ void CodeGenCatapultCTB::VisitExpr_(const Load* op, std::ostream& os) {
 }
 
 void CodeGenCatapultCTB::VisitStmt_(const Store* op) {
-  // LOG(INFO) << "visiting store\n";
   // where does stream_vars get updated?
   std::string vid = GetVarID(op->buffer_var.get());
+  LOG(INFO) << "visiting store, " << vid << "\n";
   if (stream_vars.find(vid) != stream_vars.end()) {
-    PrintIndent(); 
-    auto bits = handle_data_type_[op->buffer_var.get()].bits();
-    stream << "pkt_b" << bits << " " << vid <<  "_temp;\n";
-    PrintIndent(); 
-    stream << vid <<  "_temp.set_data(" << PrintExpr(op->value) << ");\n";
-    PrintIndent(); 
-    stream << vid <<  "_temp.set_keep(-1);\n";
-    PrintIndent(); 
-    stream << vid << ".write(" << vid << "_temp);\n";
+    // PrintIndent(); 
+    // auto bits = handle_data_type_[op->buffer_var.get()].bits();
+    // stream << "pkt_b" << bits << " " << vid <<  "_temp;\n";
+    // PrintIndent(); 
+    // stream << vid <<  "_temp.set_data(" << PrintExpr(op->value) << ");\n";
+    // PrintIndent(); 
+    // stream << vid <<  "_temp.set_keep(-1);\n";
+    // PrintIndent(); 
+    // stream << vid << ".write(" << vid << "_temp);\n";
     return;
   }
 
@@ -295,49 +337,11 @@ void CodeGenCatapultCTB::VisitStmt_(const Allocate* op) {
       scope = alloc_storage_scope_.at(buffer);
     else scope = "local";
 
-    // need to fill in fifo logic
-    // FIFO Checking 
-    // bool is_fifo = false;
-    // for (auto attr : op->attrs) {
-    //   if (attr.as<StreamStmt>()) {
-    //     is_fifo = true;
-    //   }
-    // }
-
-    // Auto-apply dataflow
-    // if (is_fifo) {
-    //   if (stream.str().find("#pragma HLS dataflow") == std::string::npos) {
-    //     LOG(INFO) << "Auto-applying dataflow optimization...";
-    //     PrintIndent();
-    //     stream << "#pragma HLS dataflow\n";
-    //   }
-    // }
-
     this->PrintIndent();
     // Skip partitioned stage
     if (vid.find("_partitioned") == std::string::npos) {
       if (constant_size > 1) { // Transfer length one array to scalar
-        // if (sdsoc_mode) {
-        //   // Allocate continuous physical mem
-        //   PrintType(op->type, stream);
-        //   stream << "* " << vid << " = (";
-        //   PrintType(op->type, stream);
-        //   stream << " *)sds_alloc(sizeof(";
-        //   PrintType(op->type, stream);
-        //   stream << ")";
 
-        //   for (auto& v : op->extents) {
-        //     stream << "*" << v;
-        //   }
-        //   stream << ")";
-        // } else {
-          // if (is_fifo) {
-          //   stream << "hls::stream<";
-          //   PrintType(op->type, stream);
-          //   stream << " > " << vid;
-
-            // Not FIFO channels
-          // } else {
             if (vid.find("_reuse") != std::string::npos) {
               PrintType(op->type, stream);
               stream << ' '<< vid;
@@ -347,20 +351,6 @@ void CodeGenCatapultCTB::VisitStmt_(const Allocate* op) {
                 stream << "]";
               }
             } else {
-              // if (sdsoc_mode) {
-              //   // allocate continuous phy mem
-              //   PrintType(op->type, stream);
-              //   stream << "* " << vid << " = (";
-              //   PrintType(op->type, stream);
-              //   stream << " *)sds_alloc(sizeof(";
-              //   PrintType(op->type, stream);
-              //   stream << ")";
-
-              //   for (auto& v : op->extents) {
-              //     stream << "*" << v;
-              //   }
-              //   stream << ")";
-              // } else {
                 PrintType(op->type, stream);
                 stream << ' '<< vid;
                 // stream << '[' << constant_size << "]";
@@ -382,11 +372,7 @@ void CodeGenCatapultCTB::VisitStmt_(const Allocate* op) {
                     PrintArray(op->init_values, extents, stream, 0, 0);
                   }
                 }
-              // }
             }
-        
-          // }
-        // }
         stream << ";\n";
       } else {
         if (vid != "_top") {
@@ -507,6 +493,7 @@ void CodeGenCatapultCTB::GenForStmt(const For* op, std::string pragma, bool befo
 void CodeGenCatapultCTB::VisitExpr_(const StreamExpr* op, std::ostream& os) {
   std::string vid = GetVarID(op->buffer_var.get());
   os << vid << ".read()";
+  LOG(INFO) << "Visting Streamexpr, " << vid << "\n";
 }
 
 void CodeGenCatapultCTB::VisitStmt_(const ExternModule* op) {
@@ -521,6 +508,7 @@ void CodeGenCatapultCTB::VisitStmt_(const ExternModule* op) {
 
 void CodeGenCatapultCTB::VisitStmt_(const StreamStmt* op) {
   std::string vid = GetVarID(op->buffer_var.get());
+  LOG(INFO) << "Visting Streamstmt, " << vid << "\n";
   PrintIndent();
   if (op->stream_type == StreamType::ATTR) {
     stream << "#pragma HLS stream variable=" << vid << " depth=" << op->depth << "\n";
@@ -547,25 +535,7 @@ class AllocateCollector final : public IRVisitor {
 };
 
 void CodeGenCatapultCTB::VisitStmt_(const KernelStmt *op) {
-  // write header files
-  decl_stream << "#include \"" << op->name << ".h\"\n";
-  decl_stream << "#include <mc_scverify.h>\n\n";
-  stream.str("");
-  stream.clear();
-
-  stream << "CCS_DESIGN(" << op->name << ") (";
-  // Extract annotation values
-  std::vector<argInfo> args_info;
-  for (size_t k = 0; k < op->annotate_keys.size(); k++) {
-    auto key = op->annotate_values[k].as<StringImm>(); CHECK(key);
-  }
-  // Print kernel function arguments
-  for (size_t i = 0; i < op->args.size(); i++) {
-    std::string arg_name = PrintExpr(op->args[i]);
-    stream << arg_name;
-    if (i < op->args.size() - 1) stream << ", ";
-  }
-  stream << ");\n";
+  // empty node
 }
 
 void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
@@ -611,38 +581,126 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
     }
   }
 
+  // write header files
+  decl_stream << "#include \"" << op->name << ".h\"\n";
+  decl_stream << "#include <mc_scverify.h>\n\n";
+  stream.str("");
+  stream.clear();
+
+  
   // print top-level kernel function
   if (is_kernel_func) {
-    // stream << "CCS_DESIGN(" << op->name << ") (";
-    // for (size_t i = 0; i < op->args.size(); ++i) {
-    //   VarExpr v = op->args[i];
-    //   var_shape_map_[v.get()] = op->arg_shapes[i];
-    //   std::string vid = AllocVarID(v.get());
+    // std::list<std::string> var_list;
+    // std::unordered_map<std::string, bool> is_arg_written;
 
-    //   // if (i != 0) stream << ", ";
-    //   // std::string str = PrintExpr(op->arg_types[i]);
-    //   // Type type = String2Type(str);
+    for (size_t i = 0; i < op->args.size(); ++i)
+    {
+      VarExpr v = op->args[i];
+      var_shape_map_[v.get()] = op->arg_shapes[i];
+      std::string vid = AllocVarID(v.get());
+      // var_list.push_back(vid);
+    }
 
-    //   // pass-by-value arguments
-    //   if (var_shape_map_[v.get()].size() == 1 &&
-    //       var_shape_map_[v.get()][0].as<IntImm>()->value == 1) {
-    //     // PrintType(type, stream);
-    //     stream << " " << vid;
+    for (size_t i = 0; i < op->args.size(); i++) {
+      VarExpr v = op->args[i];
+      std::string vid = GetVarID(v.get());
 
-    //   // pass-by-pointer arguments
-    //   } else {
-    //     // CHECK(args_info.size() > i) << i << ":" << args_info.size();
-    //     // auto info = args_info[i];
+      CHECK(args_info.size() > i) << i << ":" << args_info.size();
+      auto info = args_info[i];
+      auto shape = op->arg_shapes[i];
 
-    //     stream << " " << vid;
-    //   }
-    // }
-    // stream << ");";
+      std::string str = PrintExpr(op->arg_types[i]);
+      Type type = String2Type(str);
+
+      // is_arg_written = arg_direct.Analyze(op->body);
+      // CHECK(is_arg_written.count(vid)) << vid;
+      bool is_vid_written = is_arg_written[vid];
+      // bool is_vid_written = arg_direct.is_write(vid);
+      // LOG(INFO) << "map empty? " << is_arg_written.empty() << "\n";
+      // for (auto it : is_arg_written) {
+      //   LOG(INFO) << "map: " << it.first << " | " << it.second << "\n";
+      // }
+      // if (is_arg_written.at(vid)) {
+      //   is_vid_written = is_arg_written[vid];
+      //   LOG(INFO) << "map: " << vid << " - " << is_arg_written[vid] <<"\n";
+      // }
+      
+      if (info.stream_type == StreamType::FIFO)
+      {
+        auto bits = type.bits();
+        stream << "static ac_channel< "
+                << "ac_int<" << bits << ", true> > " << vid << "_;\n";
+        
+        if (!is_vid_written) {
+          int idx = 0;
+          for (auto &s: shape) {
+            stream << "for (unsigned int i" << idx << " = 0; i" << idx << " < " << s << "; i"
+             << idx << "++ ){\n";
+            PrintIndent();
+            idx++;
+          }
+          stream << vid << "_.write( " << "(ac_int<" << bits << ", true>)" << vid 
+            << " );\n";
+          for (int i = 0; i < idx; i++) {
+            stream << "}\n";
+          }
+        }
+      }
+    }
+
+    // print kernel call
+    stream << "CCS_DESIGN(" << op->name << ") ("; 
+    for (size_t i = 0; i < op->args.size(); i++) {
+      std::string arg_name = PrintExpr(op->args[i]);
+      auto info = args_info[i];
+      if (info.stream_type == StreamType::FIFO)
+        stream << arg_name << "_";
+      else
+        stream << arg_name;
+      if (i < op->args.size() - 1) stream << ", ";
+    }
+    stream << ");\n";
+
+    for (size_t i = 0; i < op->args.size(); ++i) {
+      VarExpr v = op->args[i];
+      // var_shape_map_[v.get()] = op->arg_shapes[i];
+      std::string vid = GetVarID(v.get());
+
+      // std::string str = PrintExpr(op->arg_types[i]);
+      // Type type = String2Type(str);
+      // auto bits = type.bits();
+
+      auto info = args_info[i];
+      auto shape = op->arg_shapes[i];
+      // bool is_vid_written = false;
+      bool is_vid_written = is_arg_written[vid];
+      // bool is_vid_written = arg_direct.is_write(vid);
+      // if (is_arg_written.at(vid)) {
+      //   is_vid_written = is_arg_written[vid];
+      // }
+      if (info.stream_type == StreamType::FIFO && is_vid_written) {
+        int idx = 0;
+        for (auto &s: shape) {
+          stream << "for (unsigned int i" << idx << " = 0; i" << idx << " < " << s << 
+            "; i" << idx << "++ ){\n";
+          PrintIndent();
+          idx++;
+        }
+        stream << vid;
+        for (int i = 0; i < idx; i++ ) {
+          stream << "[i" << i << "]";
+        }
+        stream << " = " << vid << "_.read();\n";
+        for (int i = 0; i < idx; i++ ) {
+          stream << "}\n";
+        }
+      }
+    }
 
     // function body
     int func_scope = BeginScope();
     range_ = CollectIterRange(op->body);
-    // PrintStmt(op->body);
+    VisitStmt(op->body); // issue
 
     EndScope(func_scope);
     // PrintIndent();

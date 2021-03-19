@@ -203,6 +203,30 @@ inline std::string Type2ByteVHLS(TVMType t) {
   return str;
 }
 
+inline std::string Type2ByteCatapultC(TVMType t) {
+  std::string str = "";
+  if (t.code == kDLFloat) {
+    str += "float";
+  } else if (t.code == kDLInt) {
+    str += "ac_";
+    if (t.fracs == 0) {
+        str += "int<" + std::to_string(t.bits) + ", true>";
+    } else {
+        str += "fixed<" + std::to_string(t.bits)  + "," +
+               std::to_string(t.bits - t.fracs) + ">";
+    }
+  } else if (t.code == kDLUInt) {
+    str += "ac_";
+    if (t.fracs == 0) {
+        str += "int<" + std::to_string(t.bits) + ", false>";
+    } else {
+        str += "fixed<" + std::to_string(t.bits)  + "," +
+               std::to_string(t.bits - t.fracs) + ">";
+    }
+  }
+  return str;
+}
+
 void CollectArgInfo(TVMArgs& args, 
                     LoweredFunc func,
                     std::vector<size_t>& arg_sizes,
@@ -623,7 +647,7 @@ void GenHostCode(TVMArgs& args,
   // HCL_DEBUG_LEVEL(2) << project << " host.cpp";
   if (platform == "catapultc") {
     stream.open(project + "/testbench.cpp");
-    std::ofstream head_stream(project + "/top.cpp");
+    std::ofstream head_stream(project + "/test.h");
     head_stream << top_code;
   }
   else
@@ -702,19 +726,19 @@ void GenHostCode(TVMArgs& args,
                << "(" << constant_size << ");\n ";
     
       } 
-      // else if (platform == "catapultc") {
-      //   stream << Type2ByteVHLS(arg_types[i]) << " " << arg_name; 
-      //   stream << "[";
-      //   for (int j = 0; j < arr->ndim; j++) {
-      //     if (j == arr->ndim - 1) {
-      //       stream << arr->shape[j];
-      //     } else {
-      //       stream << arr->shape[j];
-      //       stream << "][";
-      //     }
-      //   }
-      //   stream << "];\n";
-      // }
+      else if (platform == "catapultc") {
+        stream << Type2ByteCatapultC(arg_types[i]) << " " << arg_name; 
+        stream << "[";
+        for (int j = 0; j < arr->ndim; j++) {
+          if (j == arr->ndim - 1) {
+            stream << arr->shape[j];
+          } else {
+            stream << arr->shape[j];
+            stream << "][";
+          }
+        }
+        stream << "];\n";
+      }
       else {
         stream << "auto " << arg_name << " = new ";
         if (platform == "vivado_hls") {
