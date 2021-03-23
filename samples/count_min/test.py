@@ -57,4 +57,4 @@ def func_wrapper(dtype):
     #     fp.write(code)
 
 if __name__ == "__main__":
-    func_wrapper(hcl.Int(64))
+    func_wrapper(hcl.Int(32))
