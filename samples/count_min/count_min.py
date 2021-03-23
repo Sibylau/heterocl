@@ -25,20 +25,20 @@ def func_wrapper(dtype):
     mode = hcl.placeholder((1, ))
 
     def hash_index(sketch, a, b, data_key, query_key, result, mode):
-        with hcl.if_(mode == UPDATE):
+        with hcl.if_(mode[0] == UPDATE):
             with hcl.for_(0, PACKET_SIZE) as p:
                 index = hcl.compute(a.shape, lambda i: (a[i]*data_key[p] + b[i]))
                 with hcl.for_(0, N_HASH_FUNC) as i:
                     sketch[i][index[i]] += 1
                 # hcl.update(sketch, lambda i: sketch[i*HASH_RANGE+index[i]] + 1, name="update")
-        with hcl.if_(mode == QUERY):
+        with hcl.if_(mode[0] == QUERY):
             with hcl.for_(0, QUERY_NUM) as p:
                 index = hcl.compute(a.shape, lambda i: (a[i]*query_key[p] + b[i]))
                 result[p] = sketch[0][index[0]]
                 with hcl.for_(1, N_HASH_FUNC) as n:
                     with hcl.if_(result[p] > sketch[n][index[n]]):
                         result[p] = sketch[n][index[n]]
-        with hcl.if_(mode == UPDATE_QUERY):
+        with hcl.if_(mode[0] == UPDATE_QUERY):
             with hcl.for_(0, PACKET_SIZE) as p:
                 index = hcl.compute(a.shape, lambda i: (a[i]*data_key[p] + b[i])%HASH_RANGE)
                 with hcl.for_(0, N_HASH_FUNC) as i:
@@ -51,7 +51,10 @@ def func_wrapper(dtype):
                         result[q] = sketch[n][index[n]]
     
     s = hcl.create_schedule([sketch, a, b, data_key, query_key, result, mode], hash_index)
-    target = "llvm"
+    print(hcl.lower(s))
+    # target = "llvm"
+    target = hcl.platform.aws_f1
+    target.config(compile='vitis', mode='sw_sim')
     f = hcl.build(s, target, name='countmin')
     print(f)
 
