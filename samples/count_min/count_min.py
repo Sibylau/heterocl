@@ -16,13 +16,13 @@ UPDATE_QUERY = 3
 def func_wrapper(dtype):
     hcl.init(dtype)
     
-    a=hcl.placeholder((N_HASH_FUNC,), dtype=dtype)
-    b=hcl.placeholder((N_HASH_FUNC,), dtype=dtype)
-    sketch = hcl.placeholder((N_HASH_FUNC, HASH_RANGE), dtype=dtype)
-    data_key=hcl.placeholder((PACKET_SIZE,),dtype=dtype)
-    query_key=hcl.placeholder((QUERY_NUM,),dtype=dtype)
-    result=hcl.placeholder((QUERY_NUM,),dtype=dtype)
-    mode = hcl.placeholder((1, ))
+    a=hcl.placeholder((N_HASH_FUNC,), dtype=dtype, name="a")
+    b=hcl.placeholder((N_HASH_FUNC,), dtype=dtype, name="b")
+    sketch = hcl.placeholder((N_HASH_FUNC, HASH_RANGE), dtype=dtype, name="sketch")
+    data_key=hcl.placeholder((PACKET_SIZE,),dtype=dtype, name="data_key")
+    query_key=hcl.placeholder((QUERY_NUM,),dtype=dtype, name="query_key")
+    result=hcl.placeholder((QUERY_NUM,),dtype=dtype, name="result")
+    mode = hcl.placeholder((1, ), name="mode")
 
     def hash_index(sketch, a, b, data_key, query_key, result, mode):
         with hcl.if_(mode[0] == UPDATE):
@@ -53,8 +53,11 @@ def func_wrapper(dtype):
     s = hcl.create_schedule([sketch, a, b, data_key, query_key, result, mode], hash_index)
     print(hcl.lower(s))
     # target = "llvm"
-    target = hcl.platform.aws_f1
-    target.config(compile='vitis', mode='sw_sim')
+    # target = hcl.platform.aws_f1
+    # target.config(compile='vitis', mode='sw_sim')
+    config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
+    target = hcl.platform.custom(config)
+    target.config(compile="catapultc", mode="sw_sim", backend="catapultc")
     f = hcl.build(s, target, name='countmin')
     print(f)
 
