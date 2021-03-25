@@ -55,8 +55,10 @@ namespace TVM
         else {
           auto arg = map_arg_type[vid];
           const BufferNode *buf = f->api_args[i].as<BufferNode>();
-          if (v.type().is_handle() && buf)
+          if (v.type().is_handle() && buf) {
             var_shape_map_[buf->data.get()] = buf->shape;
+            array_vars.insert(std::get<0>(arg));
+          }
         }
       }
 
@@ -627,7 +629,8 @@ namespace TVM
           Type type = String2Type(str);
 
           // pass-by-value arguments
-          if (var_shape_map_[v.get()].size() == 1 &&
+          if (array_vars.count(vid) == 0 &&
+              var_shape_map_[v.get()].size() == 1 &&
               var_shape_map_[v.get()][0].as<IntImm>()->value == 1)
           {
             PrintType(type, stream);

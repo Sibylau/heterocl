@@ -292,6 +292,12 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
             cmd = "cd {}; ".format(Project.path) + \
                   "env CL_CONTEXT_MPSIM_DEVICE_INTELFPGA=1 ./host"
             out = run_process(cmd)
+    
+    elif platform == "catapultc":
+        assert os.system("which catapult >> /dev/null") == 0, \
+            "cannot find catapult on system path"
+        cmd = "cd {}; ".format(Project.path)
+        out = run_process(cmd)
 
     else:  # unsupported
         assert False, "unsupported " + platform
@@ -512,6 +518,17 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
 
         out = run_process(cmd) 
         return "success"
+    
+    elif platform == "catapultc":
+        
+        env = os.environ.copy()
+        if mode == "sw_sim":
+            # cmd = "echo \" \" > directives.tcl"
+            cmd = "catapult -file directives.tcl"
+        elif mode == "hw_sim":
+            cmd = "catapult -file directives.tcl"
+        return "success"
+            
 
     else: # unrecognized platform
         assert False, "unsupported platform " + platform

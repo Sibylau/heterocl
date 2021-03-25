@@ -28,13 +28,14 @@ def test_runtime_stream():
     B = hcl.compute(A.shape, lambda x: A[x] + 1, "B")
 
     # print(hcl.lower(s))
-
+ 
+    
     config = {"host": hcl.dev.asic("mentor"), "xcel": [hcl.dev.asic("mentor")]}
     target = hcl.platform.custom(config)
+    target.config(compile="catapultc", mode="sw_sim", backend="catapultc")
     s = hcl.create_schedule([A, B])
     s.to(A, target.xcel, mode=hcl.IO.Stream)
     s.to(B, target.host, mode=hcl.IO.Stream) 
-    target.config(compile="catapultc", mode="sw_sim", backend="catapultc")
     f = hcl.build(s, target)
     
     np_A = np.random.randint(10, size = A.shape)

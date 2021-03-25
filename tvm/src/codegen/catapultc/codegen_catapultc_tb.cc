@@ -643,8 +643,11 @@ void CodeGenCatapultCTB::VisitStmt_(const KernelDef* op) {
             PrintIndent();
             idx++;
           }
-          stream << vid << "_.write( " << "(ac_int<" << bits << ", true>)" << vid 
-            << " );\n";
+          stream << vid << "_.write( " << "(ac_int<" << bits << ", true>)" << vid;
+          for (int i = 0; i < idx; i++ ) {
+            stream << "[i" << i << "]";
+          } 
+          stream << " );\n";
           for (int i = 0; i < idx; i++) {
             stream << "}\n";
           }

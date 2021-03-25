@@ -56,6 +56,7 @@ namespace TVM
       bool sdsoc_mode{false};
       bool extern_mode{false};
       std::unordered_set<std::string> stream_vars;
+      std::set<std::string> array_vars;
     };
 
   } // namespace codegen

@@ -23,6 +23,7 @@ def func_wrapper(dtype):
     query_key=hcl.placeholder((QUERY_NUM,),dtype=dtype, name="query_key")
     result=hcl.placeholder((QUERY_NUM,),dtype=dtype, name="result")
     mode = hcl.placeholder((1, ), name="mode")
+    # mode = hcl.scalar(name="mode")
 
     def hash_index(sketch, a, b, data_key, query_key, result, mode):
         with hcl.if_(mode[0] == UPDATE):
@@ -63,7 +64,9 @@ def func_wrapper(dtype):
 
     hcl_sketch = hcl.asarray(np.zeros((N_HASH_FUNC,HASH_RANGE)),dtype=dtype)
     hcl_a = hcl.asarray(np.random.randint(10, size=(N_HASH_FUNC,)), dtype=dtype)
+    # hcl_a = hcl.asarray(np.array([7,3,3,1,7]), dtype=dtype)
     hcl_b = hcl.asarray(np.random.randint(10, size=(N_HASH_FUNC,)), dtype=dtype)
+    # hcl_b = hcl.asarray(np.array([9,9,4,1,2]), dtype=dtype)
     # hcl_data_key = hcl.asarray(np.array([5,3,7,1,0,0,7,4,3,3]), dtype=dtype)
     hcl_data_key = hcl.asarray(np.random.randint(10, size=(PACKET_SIZE,)), dtype=dtype)
     # hcl_query_key = hcl.asarray(np.array([1,2,3,4,5]), dtype=dtype)
@@ -83,6 +86,7 @@ def func_wrapper(dtype):
     print("data:", np_data_key)
     print("query:", np_query_key)
     print("result:", np_result)
+    print("mode:", np_mode)
 
     f(hcl_sketch, hcl_a, hcl_b, hcl_data_key, hcl_query_key, hcl_result, hcl_mode)
     np_sketch = hcl_sketch.asnumpy()
@@ -98,6 +102,7 @@ def func_wrapper(dtype):
     print("data:", np_data_key)
     print("query:", np_query_key)
     print("result:", np_result)
+    print("mode:", np_mode)
     # f = hcl.build(s, target, name='countmin')
 
     # with open("count_min.cpp", "w") as fp:
