@@ -31,14 +31,12 @@ CCS_MAIN(int argc, char **argv) {
     Document document;
     document.ParseStream(is);
     fclose(f);
-    assert(document.HasMember("sketch"));
-  const Value& sketch_d = document["sketch"];
-  assert(sketch_d.IsArray());
-  ac_int<32, true> sketch[5][10];
-  for (size_t i0 = 0; i0 < 5; i0++) {
-    for (size_t i1 = 0; i1 < 10; i1++) {
-      sketch[i0][i1] = (sketch_d[i1 + i0*10].GetInt());
-    }
+    assert(document.HasMember("mode"));
+  const Value& mode_d = document["mode"];
+  assert(mode_d.IsArray());
+  ac_int<32, true> mode[10];
+  for (size_t i0 = 0; i0 < 10; i0++) {
+    mode[i0] = (mode_d[i0].GetInt());
   }
 
   assert(document.HasMember("a"));
@@ -57,36 +55,20 @@ CCS_MAIN(int argc, char **argv) {
     b[i0] = (b_d[i0].GetInt());
   }
 
-  assert(document.HasMember("data_key"));
-  const Value& data_key_d = document["data_key"];
-  assert(data_key_d.IsArray());
-  ac_int<32, true> data_key[10];
+  assert(document.HasMember("key"));
+  const Value& key_d = document["key"];
+  assert(key_d.IsArray());
+  ac_int<32, true> key[10];
   for (size_t i0 = 0; i0 < 10; i0++) {
-    data_key[i0] = (data_key_d[i0].GetInt());
-  }
-
-  assert(document.HasMember("query_key"));
-  const Value& query_key_d = document["query_key"];
-  assert(query_key_d.IsArray());
-  ac_int<32, true> query_key[5];
-  for (size_t i0 = 0; i0 < 5; i0++) {
-    query_key[i0] = (query_key_d[i0].GetInt());
+    key[i0] = (key_d[i0].GetInt());
   }
 
   assert(document.HasMember("result"));
   const Value& result_d = document["result"];
   assert(result_d.IsArray());
-  ac_int<32, true> result[5];
-  for (size_t i0 = 0; i0 < 5; i0++) {
+  ac_int<32, true> result[10];
+  for (size_t i0 = 0; i0 < 10; i0++) {
     result[i0] = (result_d[i0].GetInt());
-  }
-
-  assert(document.HasMember("mode"));
-  const Value& mode_d = document["mode"];
-  assert(mode_d.IsArray());
-  ac_int<32, true> mode[1];
-  for (size_t i0 = 0; i0 < 1; i0++) {
-    mode[i0] = (mode_d[i0].GetInt());
   }
 
   std::cout << "[INFO] Initialize RTE...\n";
@@ -94,17 +76,23 @@ CCS_MAIN(int argc, char **argv) {
   // Compute and kernel call from host
   
 
-CCS_DESIGN(test) (mode, a, data_key, b, sketch, query_key, result);
+static ac_channel< ac_int<32, true> > key_;
+for (unsigned int i0 = 0; i0 < 10; i0++ ){
+  key_.write( (ac_int<32, true>)key[i0] );
+}
+static ac_channel< ac_int<32, true> > result_;
+CCS_DESIGN(test) (mode, key_, a, b, result_);
+for (unsigned int i0 = 0; i0 < 10; i0++ ){
+  result[i0] = result_.read();
+}
 
   rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
-  document["sketch"].Clear();
-  rapidjson::Value v_sketch(rapidjson::kArrayType);
-  for (size_t i0 = 0; i0 < 5; i0++) {
-    for (size_t i1 = 0; i1 < 10; i1++) {
-      v_sketch.PushBack(rapidjson::Value().SetInt(sketch[i0][i1]), allocator);
-    }
+  document["mode"].Clear();
+  rapidjson::Value v_mode(rapidjson::kArrayType);
+  for (size_t i0 = 0; i0 < 10; i0++) {
+    v_mode.PushBack(rapidjson::Value().SetInt(mode[i0]), allocator);
   }
-  document["sketch"] = v_sketch;
+  document["mode"] = v_mode;
   document["a"].Clear();
   rapidjson::Value v_a(rapidjson::kArrayType);
   for (size_t i0 = 0; i0 < 5; i0++) {
@@ -117,30 +105,18 @@ CCS_DESIGN(test) (mode, a, data_key, b, sketch, query_key, result);
     v_b.PushBack(rapidjson::Value().SetInt(b[i0]), allocator);
   }
   document["b"] = v_b;
-  document["data_key"].Clear();
-  rapidjson::Value v_data_key(rapidjson::kArrayType);
+  document["key"].Clear();
+  rapidjson::Value v_key(rapidjson::kArrayType);
   for (size_t i0 = 0; i0 < 10; i0++) {
-    v_data_key.PushBack(rapidjson::Value().SetInt(data_key[i0]), allocator);
+    v_key.PushBack(rapidjson::Value().SetInt(key[i0]), allocator);
   }
-  document["data_key"] = v_data_key;
-  document["query_key"].Clear();
-  rapidjson::Value v_query_key(rapidjson::kArrayType);
-  for (size_t i0 = 0; i0 < 5; i0++) {
-    v_query_key.PushBack(rapidjson::Value().SetInt(query_key[i0]), allocator);
-  }
-  document["query_key"] = v_query_key;
+  document["key"] = v_key;
   document["result"].Clear();
   rapidjson::Value v_result(rapidjson::kArrayType);
-  for (size_t i0 = 0; i0 < 5; i0++) {
+  for (size_t i0 = 0; i0 < 10; i0++) {
     v_result.PushBack(rapidjson::Value().SetInt(result[i0]), allocator);
   }
   document["result"] = v_result;
-  document["mode"].Clear();
-  rapidjson::Value v_mode(rapidjson::kArrayType);
-  for (size_t i0 = 0; i0 < 1; i0++) {
-    v_mode.PushBack(rapidjson::Value().SetInt(mode[i0]), allocator);
-  }
-  document["mode"] = v_mode;
 
     FILE* fp = fopen("../inputs.json", "w"); 
   
