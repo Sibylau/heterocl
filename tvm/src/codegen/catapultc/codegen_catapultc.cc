@@ -70,7 +70,7 @@ namespace TVM
       range_ = CollectIterRange(f->body);
       this->PrintStmt(f->body);
       this->EndScope(func_scope);
-      this->PrintIndent();
+      // this->PrintIndent();
     }
 
     std::string CodeGenCatapultC::GetDevice()
@@ -90,6 +90,12 @@ namespace TVM
     std::string CodeGenCatapultC::GetTop()
     {
       return head_stream.str();
+    }
+
+    void CodeGenCatapultC::PrintHeadIndent() {
+      for (int i = 0; i < head_indent_; ++i) {
+        this->head_stream << ' ';
+      }
     }
 
     void CodeGenCatapultC::PrintType(Type t, std::ostream &os)
@@ -152,20 +158,21 @@ namespace TVM
     {
       // where does stream_vars get updated?
       std::string vid = GetVarID(op->buffer_var.get());
-      LOG(INFO) << "Visit store node, " << vid << "\n";
-      if (stream_vars.find(vid) != stream_vars.end())
-      {
-        // PrintIndent();
-        // auto bits = handle_data_type_[op->buffer_var.get()].bits();
-        // stream << "pkt_b" << bits << " " << vid << "_temp;\n";
-        // PrintIndent();
-        // stream << vid << "_temp.set_data(" << PrintExpr(op->value) << ");\n";
-        // PrintIndent();
-        // stream << vid << "_temp.set_keep(-1);\n";
-        // PrintIndent();
-        // stream << vid << ".write(" << vid << "_temp);\n";
-        return;
-      }
+      // ? what if the var is not in stream_vars?
+      // LOG(INFO) << "Visit store node, " << vid << "\n";
+      // if (stream_vars.find(vid) != stream_vars.end())
+      // {
+      //   // PrintIndent();
+      //   // auto bits = handle_data_type_[op->buffer_var.get()].bits();
+      //   // stream << "pkt_b" << bits << " " << vid << "_temp;\n";
+      //   // PrintIndent();
+      //   // stream << vid << "_temp.set_data(" << PrintExpr(op->value) << ");\n";
+      //   // PrintIndent();
+      //   // stream << vid << "_temp.set_keep(-1);\n";
+      //   // PrintIndent();
+      //   // stream << vid << ".write(" << vid << "_temp);\n";
+      //   return;
+      // }
 
       // handle SetSlice
       if (const SetSlice *ss = op->value.as<SetSlice>())
@@ -306,7 +313,8 @@ namespace TVM
         // else
         //   scope = "local";
 
-        this->PrintIndent();
+        // this->PrintIndent();
+        PrintIndent();
         // Skip partitioned stage
         if (vid.find("_partitioned") == std::string::npos)
         {
@@ -500,17 +508,17 @@ namespace TVM
       os << vid << ".read()";
     }
 
-    void CodeGenCatapultC::VisitStmt_(const ExternModule *op)
-    {
-      PrintIndent();
-      if (const auto *f = runtime::Registry::Get("process_extern_module"))
-      {
-        std::string code;
-        code = (*f)(op->annotate_keys, op->annotate_values).operator std::string();
-        HCL_DEBUG_LEVEL(2) << code;
-        stream << code;
-      }
-    }
+    // void CodeGenCatapultC::VisitStmt_(const ExternModule *op)
+    // {
+    //   PrintIndent();
+    //   if (const auto *f = runtime::Registry::Get("process_extern_module"))
+    //   {
+    //     std::string code;
+    //     code = (*f)(op->annotate_keys, op->annotate_values).operator std::string();
+    //     HCL_DEBUG_LEVEL(2) << code;
+    //     stream << code;
+    //   }
+    // }
 
     void CodeGenCatapultC::VisitStmt_(const StreamStmt *op)
     {
@@ -621,9 +629,12 @@ namespace TVM
           var_shape_map_[v.get()] = op->arg_shapes[i];
           std::string vid = AllocVarID(v.get());
 
+          PrintIndent();
           if (i != 0) {
             stream << ", \n";
+            PrintIndent();
             head_stream << ", \n";
+            PrintHeadIndent();
           }
           std::string str = PrintExpr(op->arg_types[i]);
           Type type = String2Type(str);
@@ -678,6 +689,7 @@ namespace TVM
         PrintStmt(op->body);
 
         EndScope(func_scope);
+        PrintIndent();
         stream << "}\n\n";
 
         // What's the difference between top and non top kernel?

@@ -295,7 +295,7 @@ def tvm_callback_exec_evaluate(platform, mode, host_only):
     
     elif platform == "catapultc":
         assert os.system("which catapult >> /dev/null") == 0, \
-            "cannot find catapult on system path"
+            "cannot find Catapult in system path."
         cmd = "cd {}; ".format(Project.path)
         out = run_process(cmd)
 
@@ -523,10 +523,18 @@ def copy_and_compile(platform, mode, backend, host_only, cfg, script):
         
         env = os.environ.copy()
         if mode == "sw_sim":
-            # cmd = "echo \" \" > directives.tcl"
-            cmd = "catapult -file directives.tcl"
-        elif mode == "hw_sim":
-            cmd = "catapult -file directives.tcl"
+            build_path = Project.path + "/build/"
+            os.system("mkdir " + build_path)
+            os.system("cd " + build_path)
+            os.system("cp " + path + "catapultc/* " + build_path)
+            os.system("echo \"source " + build_path + "directives_csim.tcl\" | catapult -shell")
+        elif mode == "hw_syn":
+            build_path = Project.path + "/build/"
+            os.system("mkdir " + build_path)
+            os.system("cd " + build_path)
+            os.system("cp " + path + "catapultc/* " + build_path)
+            os.system("echo \"source " + build_path + "directives.tcl\" | catapult -shell")
+     
         return "success"
             
 

@@ -25,7 +25,10 @@ namespace TVM
       std::string Finish();
       std::string GetDevice();
       std::string GetTop();
+      int indent_{1};
+      int head_indent_{2};
 
+      void PrintHeadIndent();
       void PrintType(Type t, std::ostream &os) override;
 
       void VisitExpr_(const Min *op, std::ostream &os) override;
@@ -44,7 +47,7 @@ namespace TVM
       void VisitStmt_(const StreamStmt *op) override;
       void VisitStmt_(const KernelDef *op) override;
       void VisitStmt_(const KernelStmt *op) override;
-      void VisitStmt_(const ExternModule *op) override;
+      // void VisitStmt_(const ExternModule *op) override;
       // not overriding Partition node
 
       void GenForStmt(const For *op, std::string pragma, bool before);

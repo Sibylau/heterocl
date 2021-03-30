@@ -1,4 +1,4 @@
-// HASH:2461160627
+// HASH:2509525458
 #include <ac_int.h>
 #include <ac_float.h>
 #include <ac_channel.h>
@@ -7,11 +7,11 @@
 
 #pragma design top
 void CCS_BLOCK(test) (
-ac_int<32, true> mode[10], 
-ac_channel< ac_int<32, true> > &key, 
-ac_int<32, true> a[5], 
-ac_int<32, true> b[5], 
-ac_channel< ac_int<32, true> > &result) {
+  ac_int<32, true> mode[10]  , 
+  ac_channel< ac_int<32, true> > &key  , 
+  ac_int<32, true> a[5]  , 
+  ac_int<32, true> b[5]  , 
+  ac_channel< ac_int<32, true> > &result) {
         ac_int<32, true> sketch[5][10];
     sketch_x: for (unsigned x = 0; x < 5; ++x) {
       sketch_y: for (unsigned y = 0; y < 10; ++y) {
@@ -67,5 +67,5 @@ ac_channel< ac_int<32, true> > &result) {
         break;
       }
     }
-}
+  }
 

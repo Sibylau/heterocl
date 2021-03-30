@@ -650,29 +650,29 @@ void GenHostCode(TVMArgs& args,
   std::ofstream stream;
   // HCL_DEBUG_LEVEL(2) << project << " host.cpp";
   if (platform == "catapultc") {
-    stream.open(project + "/directives.tcl");
-    stream << "\
-    solution new -state initial\n\
-    solution options defaults\n\
-    solution file add ../test.h -type CHEADER\n\
-    solution file add ../kernel.cpp -type C++\n\
-    solution file add ../testbench.cpp -type C++ -exclude true\n\
-    go new\n\
-    solution library add nangate-45nm_beh -file \
-    {$MGC_HOME/pkgs/siflibs/nangate/nangate-45nm_beh.lib} -- \
-    -rtlsyntool DesignCompiler\n\
-    solution library add ccs_sample_mem -file \
-    {$MGC_HOME/pkgs/siflibs/ccs_sample_mem.lib}\n\
-    solution library add amba\n\
-    solution library add ML_amba\n\
-    go libraries\n\
-    directive set -CLOCKS {clk {-CLOCK_PERIOD 2.0 -CLOCK_EDGE rising \
-    -CLOCK_UNCERTAINTY 0.0 -CLOCK_HIGH_TIME 1.0 -RESET_SYNC_NAME \
-    rst -RESET_ASYNC_NAME arst_n -RESET_KIND sync -RESET_SYNC_ACTIVE \
-    high -RESET_ASYNC_ACTIVE low -ENABLE_ACTIVE high}}\n\
-    go assembly\n\
-    go extract\n";
-    stream.close();
+    // stream.open(project + "/directives.tcl");
+    // stream << "\
+    // solution new -state initial\n\
+    // solution options defaults\n\
+    // solution file add ../test.h -type CHEADER\n\
+    // solution file add ../kernel.cpp -type C++\n\
+    // solution file add ../testbench.cpp -type C++ -exclude true\n\
+    // go new\n\
+    // solution library add nangate-45nm_beh -file \
+    // {$MGC_HOME/pkgs/siflibs/nangate/nangate-45nm_beh.lib} -- \
+    // -rtlsyntool DesignCompiler\n\
+    // solution library add ccs_sample_mem -file \
+    // {$MGC_HOME/pkgs/siflibs/ccs_sample_mem.lib}\n\
+    // solution library add amba\n\
+    // solution library add ML_amba\n\
+    // go libraries\n\
+    // directive set -CLOCKS {clk {-CLOCK_PERIOD 2.0 -CLOCK_EDGE rising \
+    // -CLOCK_UNCERTAINTY 0.0 -CLOCK_HIGH_TIME 1.0 -RESET_SYNC_NAME \
+    // rst -RESET_ASYNC_NAME arst_n -RESET_KIND sync -RESET_SYNC_ACTIVE \
+    // high -RESET_ASYNC_ACTIVE low -ENABLE_ACTIVE high}}\n\
+    // go assembly\n\
+    // go extract\n";
+    // stream.close();
     stream.open(project + "/testbench.cpp");
     std::ofstream head_stream(project + "/test.h");
     head_stream << top_code;
